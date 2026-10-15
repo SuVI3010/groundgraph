@@ -1,0 +1,17 @@
+Meet GroundGraph, a graph-native recovery command center for airport operations. This is a bounded historical-demand replay of Chicago O'Hare from eight A.M. to noon on January twelfth, twenty twenty-four. It is an ATC-inspired research sandbox, not a live control system.
+
+The replay separates evidence clearly. Flight schedules, runway facts, and time-gated weather come from public BTS, F.A.A., and NOAA sources. Gates, ground events, operational effects, policies, and all recovery outcomes are explicitly modeled. Mixed records show both boundaries.
+
+Here, six specialists continuously watch weather, flow, gates, turnarounds, policy, and memory. Every five replay minutes, and whenever a material event occurs, they read the shared FalkorDB context graph in parallel. Their findings and handoffs are written back with a graph version before the coordinator can act.
+
+At the disruption checkpoint, a modeled baggage reconciliation delay propagates from an inbound flight to its downstream rotation. FalkorDB returns the causal path, eligible resources, current procedures, and prior outcomes. Deterministic code creates and validates the bounded candidate set. Local Qwen may choose only one returned candidate identifier; it cannot invent an action.
+
+Before application, the server checks current graph state, policy authority, source freshness, target existence, the ten-minute execution freeze, minimum benefit, and the churn guard. Seven checks pass. The policy-authorized autopilot applies three modeled actions inside the replay and writes the projected outcome back to FalkorDB.
+
+The first track is visible in the event-to-flight-to-action-to-policy path. The second is visible in versioned specialist handoffs and persistent episodic memory. A previous outcome can adjust the deterministic ranking, while the local model still makes the final allowlisted choice.
+
+For the third track, every action reaches a current synthetic procedure, its owner team, responsible role, source section, excerpt, version, and freshness status. Publishing a replacement policy creates a supersedes relationship, advances the graph version, and triggers replanning without an application-code change.
+
+Resetting the replay preserves successful episodes. The next run retrieves those memories from FalkorDB, proving that coordination and learning survive beyond one browser session.
+
+GroundGraph uses the full official FalkorDB server locally through Podman, and local Qwen through Ollama. If FalkorDB is unavailable, the interface freezes the last genuine snapshot and disables every operational control. GroundGraph makes connected decisions inspectable: what changed, who found it, why an action is allowed, what the model selected, and what the system remembers next.
