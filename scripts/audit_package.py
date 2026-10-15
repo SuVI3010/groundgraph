@@ -134,6 +134,8 @@ def demo_manifest_errors() -> list[str]:
         )
     if float(manifest.get("duration_seconds", 0)) < 60:
         errors.append("demo duration is implausibly short")
+    if int(manifest.get("frame_count", 0)) <= 0:
+        errors.append("demo manifest must record a positive decoded frame count")
 
     health = manifest.get("health", {})
     if health.get("runtime_mode") != "server":

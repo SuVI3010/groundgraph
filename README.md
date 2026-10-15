@@ -47,7 +47,7 @@ entity → SOURCED_FROM / MODELED_BY → source record → source
 policy → procedure → source document → owner team → responsible role
 ```
 
-In the judged server mode, loss of FalkorDB makes the replay API unavailable: replanning, policy authorization, handoffs, and memory cannot continue. There is no secondary operational database that can silently replace it.
+In the judged server mode, loss of FalkorDB returns a structured `503 GRAPH_UNAVAILABLE`, freezes the replay, disables operational controls, and marks the interface read-only. Replanning, policy authorization, handoffs, and memory cannot continue, and there is no secondary operational database that can silently replace it. After FalkorDB is restored, the health pulse reloads genuine graph state before re-enabling controls.
 
 ## Three-track proof
 

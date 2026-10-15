@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app import create_app
 from engine import GroundGraphEngine
@@ -453,6 +455,74 @@ def test_flask_api_returns_one_self_contained_snapshot(
     company = client.post("/api/company-brain", json={"question": "What is current?"})
     assert company.status_code == 200
     assert company.get_json()["citations"]
+
+
+def test_graph_disconnect_fails_closed_across_all_api_routes(
+    supervised_engine: GroundGraphEngine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = create_app(supervised_engine).test_client()
+
+    def disconnected_query(*_args, **_kwargs):
+        raise RedisConnectionError("official FalkorDB container is unavailable")
+
+    monkeypatch.setattr(supervised_engine.backend, "query", disconnected_query)
+    requests = [
+        ("get", "/api/health", None),
+        ("get", "/api/snapshot", None),
+        ("get", "/api/replanning", None),
+        ("post", "/api/company-brain", {"question": "Who owns gate recovery?"}),
+        ("post", "/api/replan/tick", {"minutes": 1}),
+        ("post", "/api/analyze", {"trigger": "OUTAGE_TEST"}),
+        ("post", "/api/apply", {"plan_id": "PLAN-UNKNOWN", "state_version": 1}),
+        ("post", "/api/reset", {"preserve_memory": False}),
+        ("post", "/api/autonomy", {"enabled": True}),
+        ("post", "/api/policies/supersede", {"policy_id": "POL-GATE-1.4"}),
+    ]
+
+    for method, path, body in requests:
+        response = getattr(client, method)(path, json=body)
+        payload = response.get_json()
+        assert response.status_code == 503, path
+        assert payload["ok"] is False, path
+        assert payload["status"] == "unavailable", path
+        assert payload["code"] == "GRAPH_UNAVAILABLE", path
+        assert payload["runtime_mode"] == "lite", path
+        assert "mutations are disabled" in payload["detail"], path
+
+    # A failed persistence write cannot silently enable process-local autonomy.
+    assert supervised_engine.auto_apply is False
+
+
+def test_health_probe_is_lightweight_and_does_not_build_a_full_snapshot(
+    supervised_engine: GroundGraphEngine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def forbidden_snapshot():
+        raise AssertionError("health polling must not contend on the full snapshot lock")
+
+    monkeypatch.setattr(supervised_engine, "snapshot", forbidden_snapshot)
+    health = supervised_engine.health()
+
+    assert health["ok"] is True
+    assert health["status"] == "healthy"
+    assert health["node_count"] > 0
+    assert health["edge_count"] > 0
+
+
+def test_health_distinguishes_reseeding_from_transport_loss(
+    supervised_engine: GroundGraphEngine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        supervised_engine.backend,
+        "query",
+        lambda *_args, **_kwargs: SimpleNamespace(result_set=[]),
+    )
+    response = create_app(supervised_engine).test_client().get("/api/health")
+
+    assert response.status_code == 503
+    assert response.get_json()["code"] == "GRAPH_NOT_READY"
 
 
 def test_causal_path_contains_only_real_edges_and_refreshes_after_deletion(

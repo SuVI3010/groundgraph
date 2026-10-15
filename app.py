@@ -7,8 +7,10 @@ import threading
 from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from engine import GroundGraphEngine
+from engine import GraphNotReadyError, GroundGraphEngine
 
 
 def create_app(engine: GroundGraphEngine | None = None) -> Flask:
@@ -17,12 +19,40 @@ def create_app(engine: GroundGraphEngine | None = None) -> Flask:
     holder: dict[str, GroundGraphEngine | None] = {"engine": engine}
     init_lock = threading.Lock()
 
+    def unavailable_payload(
+        exc: Exception, *, code: str = "GRAPH_UNAVAILABLE"
+    ) -> dict[str, Any]:
+        active_engine = holder["engine"]
+        runtime_mode = (
+            active_engine.backend.mode
+            if active_engine is not None
+            else os.getenv("FALKORDB_MODE", "server")
+        )
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "code": code,
+            "runtime_mode": runtime_mode,
+            "error": str(exc),
+            "detail": (
+                "FalkorDB is unavailable; operational reads, replanning, and "
+                "mutations are disabled until the graph server is restored."
+            ),
+        }
+
     def get_engine() -> GroundGraphEngine:
         if holder["engine"] is None:
             with init_lock:
                 if holder["engine"] is None:
                     holder["engine"] = GroundGraphEngine()
         return holder["engine"]
+
+    @app.errorhandler(RedisConnectionError)
+    @app.errorhandler(RedisTimeoutError)
+    def graph_backend_unavailable(exc: RedisConnectionError | RedisTimeoutError):
+        """Return one fail-closed contract for every graph-backed API route."""
+
+        return jsonify(unavailable_payload(exc)), 503
 
     @app.get("/")
     def index():
@@ -32,19 +62,10 @@ def create_app(engine: GroundGraphEngine | None = None) -> Flask:
     def health():
         try:
             return jsonify(get_engine().health())
+        except GraphNotReadyError as exc:
+            return jsonify(unavailable_payload(exc, code="GRAPH_NOT_READY")), 503
         except Exception as exc:
-            return (
-                jsonify(
-                    {
-                        "ok": False,
-                        "status": "unavailable",
-                        "runtime_mode": os.getenv("FALKORDB_MODE", "server"),
-                        "error": str(exc),
-                        "detail": "Start the local FalkorDB server or explicitly select FALKORDB_MODE=lite.",
-                    }
-                ),
-                503,
-            )
+            return jsonify(unavailable_payload(exc)), 503
 
     @app.get("/api/snapshot")
     def snapshot():

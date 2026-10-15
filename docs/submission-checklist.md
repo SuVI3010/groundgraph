@@ -10,6 +10,7 @@
 - [x] `make demo-check` verifies the exact official image, graph module, matching API/graph/endpoint, and a live local-model inference.
 - [x] FalkorDBLite fallback is labeled separately.
 - [x] Clean-clone instructions are documented.
+- [x] A tracked-files-only isolated snapshot completed setup, official-server seed/reset/analyze, six-agent coordination, local Qwen selection, `make verify`, and `make demo-check` on this host.
 - [ ] Clean-clone setup is repeated on a second account or machine.
 
 ## Required technical evidence
@@ -23,7 +24,7 @@
 - [x] All three tracks are declared with visible and stored proofs.
 - [x] All six optional MCP tools, including `get_coordinator_trace`, are documented and covered by a bounded-surface test.
 - [x] AI coding assistance and the product model are disclosed.
-- [ ] Disconnecting FalkorDB makes the server-mode API and mutations visibly unavailable; no browser simulation continues.
+- [x] Disconnecting FalkorDB returns a consistent `GRAPH_UNAVAILABLE` response, freezes the replay, disables controls, and visibly marks the browser read-only; the health pulse reconnects from graph state after restoration.
 - [x] `/api/health` is captured with `runtime_mode: server` in the final demo manifest.
 - [x] Automated tests pass on the final release candidate.
 - [x] Fresh official-server run persists memory across application restart.

@@ -41,6 +41,10 @@ ACTION_TYPES = (
 )
 
 
+class GraphNotReadyError(RuntimeError):
+    """The graph server answered, but operational state is being rebuilt."""
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
         "+00:00", "Z"
@@ -3329,11 +3333,14 @@ class GroundGraphEngine:
         """Change the server-side replay execution authority at runtime."""
 
         with self._lock:
-            self.auto_apply = bool(enabled)
+            requested = bool(enabled)
             self.backend.query(
                 "MATCH (s:Scenario {id: $id}) SET s.auto_apply = $enabled",
-                {"id": self.scenario_id, "enabled": self.auto_apply},
+                {"id": self.scenario_id, "enabled": requested},
             )
+            # Do not change the process-local authority flag unless FalkorDB
+            # accepted the same state. A disconnected graph must fail closed.
+            self.auto_apply = requested
             plan = self._current_plan()
             if plan and plan.get("status") == "PROPOSED":
                 automation = dict(plan.get("automation", {}))
@@ -3948,17 +3955,27 @@ class GroundGraphEngine:
 
     def health(self) -> dict[str, Any]:
         started = time.monotonic()
-        snapshot = self.snapshot()
+        state_rows = self.backend.query(
+            "MATCH (s:Scenario {id: $id}) RETURN s.state_version, s.cycle",
+            {"id": self.scenario_id},
+        ).result_set
+        if not state_rows:
+            raise GraphNotReadyError("Scenario graph is being rebuilt")
+        node_rows = self.backend.query("MATCH (n) RETURN count(n)").result_set
+        edge_rows = self.backend.query("MATCH ()-[r]->() RETURN count(r)").result_set
+        state_version, cycle = state_rows[0]
+        node_count = int(node_rows[0][0]) if node_rows else 0
+        edge_count = int(edge_rows[0][0]) if edge_rows else 0
         return {
             "ok": True,
             "status": "healthy",
             "runtime_mode": self.backend.mode,
             "graph": self.backend.graph_name,
             "endpoint": self.backend.endpoint,
-            "state_version": snapshot["state_version"],
-            "cycle": snapshot["clock"]["cycle"],
-            "node_count": snapshot["graph"]["node_count"],
-            "edge_count": snapshot["graph"]["edge_count"],
+            "state_version": int(state_version),
+            "cycle": int(cycle),
+            "node_count": node_count,
+            "edge_count": edge_count,
             "llm": {"enabled": self.enable_llm, "provider": "ollama", "model": self.model, "timeout_seconds": self.ollama_timeout, "fallback": "deterministic_safe_planner"},
             "agents": {
                 "specialist_count": len(SPECIALISTS),

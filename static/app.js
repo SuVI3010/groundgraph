@@ -22,6 +22,9 @@ const ui = {
   selectedCycle: null,
   map: null,
   tickTimer: null,
+  healthTimer: null,
+  healthChecking: false,
+  healthFailures: 0,
   frame: null,
   lastFrameAt: 0,
   scrubbing: false,
@@ -542,6 +545,7 @@ async function askOperationsBrain(question) {
     renderBrainAnswer(payload);
   } catch (error) {
     failed = true;
+    if (!error?.status || number(error.status) >= 500) enterEngineUnavailable(error, { preserveSnapshot: true });
     $("brain-answer").innerHTML = `<div class="brain-error">${escapeHtml(first(error.message, "Operations Brain is unavailable."))}</div>`;
   } finally {
     setBrainBusy(false);
@@ -559,7 +563,10 @@ async function setAutonomy(enabled) {
   } catch (error) {
     toggle.checked = ui.snapshot.replanning.auto_apply === true;
     $("auto-apply-state").textContent = `${toggle.checked ? "server on" : "waiting for approval"} · ${number(ui.snapshot.replanning.execution_freeze_minutes, 10)}-min churn guard`;
-    showToast(first(error.message, "Could not update autonomy setting"));
+    if (!error?.status || number(error.status) >= 500) {
+      enterEngineUnavailable(error, { preserveSnapshot: true });
+      showToast("Engine unavailable — replay frozen");
+    } else showToast(first(error.message, "Could not update autonomy setting"));
   } finally { toggle.disabled = !ui.backend; }
 }
 
@@ -641,7 +648,7 @@ function syncEngineAvailability() {
     $("engine-unavailable-copy").textContent = connecting
       ? "Verifying the API, FalkorDB graph, and planning runtime before enabling controls."
       : frozen
-      ? "The last genuine server snapshot is frozen in read-only mode. Restore FalkorDB and reload to continue."
+      ? "The last genuine server snapshot is frozen in read-only mode. Restore FalkorDB; GroundGraph will reload graph state before re-enabling controls."
       : "GroundGraph requires the API and FalkorDB to load state, run agents, replan, or apply decisions.";
   }
   if (!available) renderUnavailablePresentation();
@@ -651,7 +658,7 @@ function syncEngineAvailability() {
 function enterEngineUnavailable(error, { preserveSnapshot = false } = {}) {
   ui.playing = false; ui.busy = false; ui.backend = false; ui.health = {};
   ui.unavailableReason = first(error?.message, "FalkorDB is required to run GroundGraph.");
-  const preserveGenuine = preserveSnapshot && ui.source === "api" && ui.snapshot?.ok === true;
+  const preserveGenuine = preserveSnapshot && ["api", "api-frozen"].includes(ui.source) && ui.snapshot?.ok === true;
   ui.source = preserveGenuine ? "api-frozen" : "unavailable";
   renderSnapshot(preserveGenuine ? ui.snapshot : UNAVAILABLE_SNAPSHOT, { keepVisualTime: preserveGenuine });
 }
@@ -699,6 +706,33 @@ async function advance(minutes) {
   if (!ui.backend || !ui.playing || ui.busy || ui.snapshot.clock.minute >= ui.snapshot.scenario.end_minute) { if (ui.snapshot?.clock?.minute >= ui.snapshot?.scenario?.end_minute) setPlaying(false); return; }
   await mutation("/api/replan/tick", { minutes: Math.max(1, Math.min(30, Math.round(minutes))) });
 }
+
+async function verifyRuntimeAvailability() {
+  if (ui.busy || ui.brainBusy || ui.healthChecking) return;
+  ui.healthChecking = true;
+  try {
+    const health = requireHealthyRuntime(await request("/api/health", { timeout: 5000 }));
+    ui.healthFailures = 0;
+    if (!ui.backend) {
+      const snapshot = requireHealthySnapshot(await request("/api/snapshot", { timeout: 15000 }));
+      ui.health = health; ui.backend = true; ui.source = "api"; ui.unavailableReason = "";
+      renderSnapshot(snapshot);
+      setPlaying(false);
+      showToast("FalkorDB restored — live replay reconnected");
+    } else {
+      ui.health = health;
+      renderRuntime();
+    }
+  } catch (error) {
+    ui.healthFailures += 1;
+    const explicitGraphOutage = number(error?.status) === 503 && error?.payload?.code === "GRAPH_UNAVAILABLE";
+    if (ui.backend && (explicitGraphOutage || ui.healthFailures >= 2)) {
+      enterEngineUnavailable(error, { preserveSnapshot: true });
+      showToast("Engine connection lost — replay frozen");
+    }
+  } finally { ui.healthChecking = false; }
+}
+
 async function runReplan(trigger = "MANUAL_UI") {
   const result = await mutation("/api/analyze", { trigger });
   if (result) showToast(result.current_plan ? "Graph-safe plan returned" : "Cycle complete: no material change");
@@ -753,6 +787,11 @@ async function resetReplay() {
 
 function setPlaying(active) {
   ui.playing = Boolean(active) && ui.backend && ui.snapshot.clock.minute < ui.snapshot.scenario.end_minute;
+  if (!ui.backend) {
+    $("play-icon").textContent = "!"; $("play-label").textContent = "Unavailable";
+    $("play-button").setAttribute("aria-pressed", "false");
+    return;
+  }
   $("play-icon").textContent = ui.playing ? "Ⅱ" : "▶"; $("play-label").textContent = ui.playing ? "Pause" : "Play";
   $("play-button").setAttribute("aria-pressed", String(ui.playing));
 }
@@ -816,8 +855,10 @@ async function boot() {
     const snapshot = requireHealthySnapshot(snapshotResult); ui.health = requireHealthyRuntime(healthResult); ui.backend = true; ui.source = "api"; ui.unavailableReason = "";
     renderSnapshot(snapshot); setPlaying(false); syncEngineAvailability();
   } catch (error) { enterEngineUnavailable(error); }
-  ui.tickTimer = setInterval(() => advance(ui.speed), 1000); ui.frame = requestAnimationFrame(animationFrame);
+  ui.tickTimer = setInterval(() => advance(ui.speed), 1000);
+  ui.healthTimer = setInterval(verifyRuntimeAvailability, 5000);
+  ui.frame = requestAnimationFrame(animationFrame);
 }
 
-window.addEventListener("beforeunload", () => { clearInterval(ui.tickTimer); cancelAnimationFrame(ui.frame); ui.map?.destroy(); });
+window.addEventListener("beforeunload", () => { clearInterval(ui.tickTimer); clearInterval(ui.healthTimer); cancelAnimationFrame(ui.frame); ui.map?.destroy(); });
 boot();

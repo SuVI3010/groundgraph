@@ -77,7 +77,7 @@
   "output": "demo/groundgraph-demo.mp4",
   "duration_seconds": 229.381667,
   "sha256": "781275a81a869e9ddc4634e43d3e295eda842374ef4b1f87b22ef292f62848f5",
-  "frame_count": 3404,
+  "frame_count": 3405,
   "source_commit": "d530e5a4286772cb8e5e60290ac4527f0c18785e",
   "media_qa": {
     "full_decode": "passed",

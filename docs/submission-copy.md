@@ -34,7 +34,7 @@ GroundGraph is a research replay. It does not control aircraft or airport system
 
 ## Why FalkorDB
 
-FalkorDB is the primary application state, not a visualization added after planning. The replay reads flights, resources, events, policy, and prior memory from the graph. Specialists communicate through graph-persisted findings and handoffs. The coordinator writes episodes, plans, actions, outcomes, and memory back to the same graph. If FalkorDB is unavailable, the core workflow is unavailable.
+FalkorDB is the primary application state, not a visualization added after planning. The replay reads flights, resources, events, policy, and prior memory from the graph. Specialists communicate through graph-persisted findings and handoffs. The coordinator writes episodes, plans, actions, outcomes, and memory back to the same graph. If FalkorDB is unavailable, every graph-backed API fails closed with `503 GRAPH_UNAVAILABLE`; the browser freezes and becomes read-only. Its health pulse reloads genuine graph state before controls return after recovery.
 
 ## Technical highlights
 
