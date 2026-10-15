@@ -1,0 +1,290 @@
+{
+  "scenario": {
+    "id": "ORD-2024-01-12-WINTER-AM",
+    "name": "O'Hare winter operations recovery",
+    "airport": "ORD",
+    "airport_name": "Chicago O'Hare International Airport",
+    "timezone": "America/Chicago",
+    "start_at": "2024-01-12T08:00:00-06:00",
+    "end_at": "2024-01-12T12:00:00-06:00",
+    "initial_clock": "08:00",
+    "duration_minutes": 240,
+    "planning_interval_minutes": 5,
+    "planning_horizon_minutes": 90,
+    "execution_freeze_minutes": 10,
+    "description": "A bounded historical-demand replay with public schedule, weather, and runway facts plus clearly labeled modeled operating assumptions."
+  },
+  "resources": {
+    "runways": [
+      {
+        "id": "RWY-10C-28C",
+        "label": "10C / 28C",
+        "length_ft": 10800,
+        "role": "ARRIVAL",
+        "capacity_per_hour": 24,
+        "status": "LIMITED"
+      },
+      {
+        "id": "RWY-10L-28R",
+        "label": "10L / 28R",
+        "length_ft": 13000,
+        "role": "DEPARTURE",
+        "capacity_per_hour": 30,
+        "status": "OPEN"
+      },
+      {
+        "id": "RWY-09R-27L",
+        "label": "09R / 27L",
+        "length_ft": 11260,
+        "role": "MIXED",
+        "capacity_per_hour": 18,
+        "status": "STANDBY"
+      }
+    ],
+    "gates": [
+      {"id": "C12", "terminal": "1-C", "status": "OCCUPIED", "compatible_classes": ["NARROWBODY"]},
+      {"id": "C14", "terminal": "1-C", "status": "OCCUPIED", "compatible_classes": ["NARROWBODY"]},
+      {"id": "C16", "terminal": "1-C", "status": "OCCUPIED", "compatible_classes": ["NARROWBODY"]},
+      {"id": "C18", "terminal": "1-C", "status": "AVAILABLE", "compatible_classes": ["NARROWBODY"]}
+    ]
+  },
+  "flights": [
+    {
+      "id": "UA373-IN",
+      "callsign": "UA373",
+      "kind": "INBOUND",
+      "origin": "BTV",
+      "destination": "ORD",
+      "scheduled_minute": 3,
+      "gate": "C12",
+      "runway": "RWY-10C-28C",
+      "status": "APPROACH",
+      "rotation_id": "ROT-UA373-UA2445",
+      "turn_minutes": 45,
+      "bag_risk": "LOW",
+      "source_kind": "OBSERVED"
+    },
+    {
+      "id": "UA2445-OUT",
+      "callsign": "UA2445",
+      "kind": "OUTBOUND",
+      "origin": "ORD",
+      "destination": "SAN",
+      "scheduled_minute": 75,
+      "gate": "C12",
+      "runway": "RWY-10L-28R",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-UA373-UA2445",
+      "turn_minutes": 45,
+      "bag_risk": "LOW",
+      "source_kind": "OBSERVED"
+    },
+    {
+      "id": "UA1888-IN",
+      "callsign": "UA1888",
+      "kind": "INBOUND",
+      "origin": "ATL",
+      "destination": "ORD",
+      "scheduled_minute": 1,
+      "gate": "C14",
+      "runway": "RWY-10C-28C",
+      "status": "APPROACH",
+      "rotation_id": "ROT-UA1888-UA1071",
+      "turn_minutes": 45,
+      "bag_risk": "MEDIUM",
+      "source_kind": "OBSERVED"
+    },
+    {
+      "id": "UA1071-OUT",
+      "callsign": "UA1071",
+      "kind": "OUTBOUND",
+      "origin": "ORD",
+      "destination": "DFW",
+      "scheduled_minute": 75,
+      "gate": "C14",
+      "runway": "RWY-10L-28R",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-UA1888-UA1071",
+      "turn_minutes": 45,
+      "bag_risk": "LOW",
+      "source_kind": "OBSERVED"
+    },
+    {
+      "id": "UA1414-IN",
+      "callsign": "UA1414",
+      "kind": "INBOUND",
+      "origin": "SYR",
+      "destination": "ORD",
+      "scheduled_minute": 3,
+      "gate": "C16",
+      "runway": "RWY-10C-28C",
+      "status": "APPROACH",
+      "rotation_id": "ROT-UA1414-UA2672",
+      "turn_minutes": 45,
+      "bag_risk": "HIGH",
+      "source_kind": "OBSERVED"
+    },
+    {
+      "id": "UA2672-OUT",
+      "callsign": "UA2672",
+      "kind": "OUTBOUND",
+      "origin": "ORD",
+      "destination": "AUS",
+      "scheduled_minute": 85,
+      "gate": "C16",
+      "runway": "RWY-10L-28R",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-UA1414-UA2672",
+      "turn_minutes": 45,
+      "bag_risk": "HIGH",
+      "source_kind": "OBSERVED"
+    }
+  ],
+  "events": [
+    {
+      "id": "EVT-WX-0800",
+      "at_minute": 0,
+      "type": "LOW_VISIBILITY_SNOW",
+      "severity": "HIGH",
+      "flight_id": null,
+      "resource_id": "RWY-10C-28C",
+      "delay_minutes": 18,
+      "capacity_delta": -8,
+      "summary": "KORD reports 3/4 mile visibility, snow and mist; arrival capacity is constrained in the replay model.",
+      "source_kind": "OBSERVED",
+      "source_id": "NOAA-KORD-2024-01-12T08:00"
+    },
+    {
+      "id": "EVT-BAG-0836",
+      "at_minute": 36,
+      "type": "BAG_RECONCILIATION_DELAY",
+      "severity": "HIGH",
+      "flight_id": "UA1414-IN",
+      "resource_id": "C16",
+      "delay_minutes": 12,
+      "summary": "A modeled baggage scan mismatch extends the UA1414 to UA2672 turnaround from 45 to 57 minutes.",
+      "source_kind": "MODELED",
+      "source_id": "MODEL-GROUND-OPS-V1"
+    },
+    {
+      "id": "EVT-WX-0904",
+      "at_minute": 64,
+      "type": "WEATHER_UPDATE",
+      "severity": "MEDIUM",
+      "flight_id": null,
+      "resource_id": "RWY-10C-28C",
+      "delay_minutes": 0,
+      "capacity_delta": 6,
+      "summary": "The 09:04 KORD SPECI reports visibility improving to 2 miles, triggering an event-driven replan.",
+      "source_kind": "OBSERVED",
+      "source_id": "NOAA-KORD-2024-01-12T09:04"
+    },
+    {
+      "id": "EVT-RWY-0912",
+      "at_minute": 72,
+      "type": "RUNWAY_OCCUPANCY_CHECK",
+      "severity": "MEDIUM",
+      "flight_id": null,
+      "resource_id": "RWY-10L-28R",
+      "delay_minutes": 6,
+      "capacity_delta": -4,
+      "summary": "A modeled ten-minute runway occupancy inspection temporarily reduces departure throughput.",
+      "source_kind": "MODELED",
+      "source_id": "MODEL-RUNWAY-EVENT-V1"
+    }
+  ],
+  "policies": [
+    {
+      "id": "PROC-GATE-1.2",
+      "title": "Gate reassignment during constrained operations",
+      "version": "1.2",
+      "status": "SUPERSEDED",
+      "current": false,
+      "effective_at": "2023-11-01",
+      "owner": "Ramp Control",
+      "source": "Synthetic ORD Operations Handbook §4.2",
+      "action_types": ["REASSIGN_GATE"],
+      "rule": "An available compatible gate may be assigned after conflict and tow checks.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "PROC-GATE-1.3",
+      "title": "Gate reassignment during constrained operations",
+      "version": "1.3",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Ramp Control",
+      "source": "Synthetic ORD Operations Handbook §4.2",
+      "action_types": ["REASSIGN_GATE"],
+      "rule": "An available compatible gate may be assigned when the occupancy window is clear and the operation remains inside the planning horizon.",
+      "supersedes": "PROC-GATE-1.2",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "PROC-SLOT-2.1",
+      "title": "Departure capacity prioritization",
+      "version": "2.1",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Flow Management",
+      "source": "Synthetic ORD Operations Handbook §6.1",
+      "action_types": ["RESERVE_SLOT", "RESEQUENCE_DEPARTURE"],
+      "rule": "A protected departure slot must be unique, open, and linked to the active capacity resource.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "PROC-TURN-3.0",
+      "title": "Turnaround recovery and rotation protection",
+      "version": "3.0",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Turnaround Control",
+      "source": "Synthetic ORD Operations Handbook §7.4",
+      "action_types": ["RESEQUENCE_TASKS", "PROTECT_ROTATION"],
+      "rule": "Independent tasks may run concurrently, while all dependency edges and minimum task durations remain binding.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "PROC-AUTO-1.0",
+      "title": "Bounded automatic recovery",
+      "version": "1.0",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Airport Operations Center",
+      "source": "Synthetic Shift Bulletin 2024-01-12-A",
+      "action_types": ["APPLY_VALIDATED_PLAN"],
+      "rule": "The system may automatically apply a validated plan only within modeled replay scope, with current graph state and a complete audit trail.",
+      "source_kind": "MODELED"
+    }
+  ],
+  "provenance": [
+    {
+      "id": "BTS-2024-01",
+      "label": "BTS On-Time Performance, January 2024",
+      "url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2024_1.zip",
+      "kind": "OBSERVED_POST_EVENT_ARCHIVE"
+    },
+    {
+      "id": "NOAA-KORD-2024",
+      "label": "NOAA Global Hourly KORD observations, 2024",
+      "url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2024/72530094846.csv",
+      "kind": "OBSERVED"
+    },
+    {
+      "id": "FAA-NASR-2023-12-28",
+      "label": "FAA NASR airport and runway records",
+      "url": "https://nfdc.faa.gov/webContent/28DaySub/extra/28_Dec_2023_APT_CSV.zip",
+      "kind": "OBSERVED"
+    },
+    {
+      "id": "MODEL-GROUNDGRAPH-V1",
+      "label": "GroundGraph bounded operating assumptions",
+      "url": "docs/data-provenance.md",
+      "kind": "MODELED"
+    }
+  ]
+}
