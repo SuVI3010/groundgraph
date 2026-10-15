@@ -1,0 +1,178 @@
+{
+  "schema_version": "1.0",
+  "pack_id": "GROUNDGRAPH-OPS-KNOWLEDGE-2024-01-12",
+  "title": "GroundGraph synthetic airport-operations knowledge pack",
+  "organization": {
+    "id": "ORG-GROUNDGRAPH-DEMO",
+    "name": "GroundGraph Demonstration Operations Center",
+    "truth_label": "MODELED"
+  },
+  "disclaimer": "All policies, roles, incidents, and shift records in this pack are synthetic demonstration material. They are not O'Hare, airline, FAA, or ATC records or procedures.",
+  "teams": [
+    {"id": "TEAM-OPS-CONTROL", "name": "Operations Control", "truth_label": "MODELED"},
+    {"id": "TEAM-FLOW", "name": "Flow Management", "truth_label": "MODELED"},
+    {"id": "TEAM-GATE", "name": "Gate Operations", "truth_label": "MODELED"},
+    {"id": "TEAM-TURN", "name": "Turnaround Coordination", "truth_label": "MODELED"},
+    {"id": "TEAM-ASSURANCE", "name": "Operational Assurance", "truth_label": "MODELED"}
+  ],
+  "roles": [
+    {"id": "ROLE-DUTY-MANAGER", "name": "Operations Duty Manager", "team_id": "TEAM-OPS-CONTROL", "may_approve": ["APPLY_VALIDATED_PLAN"]},
+    {"id": "ROLE-FLOW-COORD", "name": "Flow Coordinator", "team_id": "TEAM-FLOW", "may_approve": ["RESEQUENCE_DEPARTURE"]},
+    {"id": "ROLE-GATE-LEAD", "name": "Gate Control Lead", "team_id": "TEAM-GATE", "may_approve": ["REASSIGN_GATE"]},
+    {"id": "ROLE-TURN-COORD", "name": "Turnaround Coordinator", "team_id": "TEAM-TURN", "may_approve": ["PROTECT_ROTATION"]},
+    {"id": "ROLE-ASSURANCE", "name": "Assurance Reviewer", "team_id": "TEAM-ASSURANCE", "may_approve": ["PUBLISH_DECISION"]}
+  ],
+  "documents": [
+    {
+      "id": "GG-OPS-HANDBOOK:1.1",
+      "kind": "SOP",
+      "title": "GroundGraph demonstration operations handbook",
+      "version": "1.1",
+      "path": "operations-handbook-v1.1.md",
+      "status": "SUPERSEDED",
+      "effective_from": "2023-10-01T00:00:00Z",
+      "effective_to": "2023-12-31T23:59:59Z",
+      "owner_team_id": "TEAM-OPS-CONTROL",
+      "superseded_by": "GG-OPS-HANDBOOK:1.2",
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "GG-OPS-HANDBOOK:1.2",
+      "kind": "SOP",
+      "title": "GroundGraph demonstration operations handbook",
+      "version": "1.2",
+      "path": "operations-handbook-v1.2.md",
+      "status": "CURRENT",
+      "effective_from": "2024-01-01T00:00:00Z",
+      "effective_to": null,
+      "review_due": "2024-04-01T00:00:00Z",
+      "owner_team_id": "TEAM-OPS-CONTROL",
+      "supersedes": "GG-OPS-HANDBOOK:1.1",
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "INC-2024-0112-OPS-07",
+      "kind": "INCIDENT_TICKET",
+      "title": "Baggage reconciliation task exceeds modeled duration",
+      "version": "1",
+      "path": "incident-INC-2024-0112-OPS-07.md",
+      "status": "MONITORING",
+      "created_at": "2024-01-12T14:36:00Z",
+      "owner_team_id": "TEAM-TURN",
+      "fresh_until": "2024-01-12T17:36:00Z",
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "SHIFT-HANDOFF-2024-0112-A",
+      "kind": "SHIFT_HANDOFF",
+      "title": "Morning operations handoff",
+      "version": "1",
+      "path": "shift-handoff-2024-01-12-a.md",
+      "status": "CURRENT_AT_DECISION",
+      "created_at": "2024-01-12T14:50:00Z",
+      "owner_team_id": "TEAM-OPS-CONTROL",
+      "responsible_role_id": "ROLE-DUTY-MANAGER",
+      "fresh_until": "2024-01-12T16:50:00Z",
+      "truth_label": "MODELED"
+    }
+  ],
+  "procedures": [
+    {
+      "id": "OPS-AUTO-04:1.1",
+      "code": "OPS-AUTO-04",
+      "title": "Automated recovery application",
+      "action_type": "APPLY_VALIDATED_PLAN",
+      "document_id": "GG-OPS-HANDBOOK:1.1",
+      "source_section": "OPS-AUTO-04",
+      "owner_team_id": "TEAM-OPS-CONTROL",
+      "responsible_role_id": "ROLE-DUTY-MANAGER",
+      "status": "SUPERSEDED",
+      "effective_from": "2023-10-01T00:00:00Z",
+      "effective_to": "2023-12-31T23:59:59Z",
+      "superseded_by": "OPS-AUTO-04:1.2",
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "OPS-AUTO-04:1.2",
+      "code": "OPS-AUTO-04",
+      "title": "Supervised automatic recovery application",
+      "action_type": "APPLY_VALIDATED_PLAN",
+      "document_id": "GG-OPS-HANDBOOK:1.2",
+      "source_section": "OPS-AUTO-04",
+      "owner_team_id": "TEAM-OPS-CONTROL",
+      "responsible_role_id": "ROLE-DUTY-MANAGER",
+      "status": "CURRENT",
+      "effective_from": "2024-01-01T00:00:00Z",
+      "effective_to": null,
+      "supersedes": "OPS-AUTO-04:1.1",
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "OPS-FLOW-02:1.2",
+      "code": "OPS-FLOW-02",
+      "title": "Capacity-slot prioritization",
+      "action_type": "RESEQUENCE_DEPARTURE",
+      "document_id": "GG-OPS-HANDBOOK:1.2",
+      "source_section": "OPS-FLOW-02",
+      "owner_team_id": "TEAM-FLOW",
+      "responsible_role_id": "ROLE-FLOW-COORD",
+      "status": "CURRENT",
+      "effective_from": "2024-01-01T00:00:00Z",
+      "effective_to": null,
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "OPS-GATE-01:1.2",
+      "code": "OPS-GATE-01",
+      "title": "Compatible-gate reassignment",
+      "action_type": "REASSIGN_GATE",
+      "document_id": "GG-OPS-HANDBOOK:1.2",
+      "source_section": "OPS-GATE-01",
+      "owner_team_id": "TEAM-GATE",
+      "responsible_role_id": "ROLE-GATE-LEAD",
+      "status": "CURRENT",
+      "effective_from": "2024-01-01T00:00:00Z",
+      "effective_to": null,
+      "truth_label": "MODELED"
+    },
+    {
+      "id": "OPS-TURN-03:1.2",
+      "code": "OPS-TURN-03",
+      "title": "Rotation protection",
+      "action_type": "PROTECT_ROTATION",
+      "document_id": "GG-OPS-HANDBOOK:1.2",
+      "source_section": "OPS-TURN-03",
+      "owner_team_id": "TEAM-TURN",
+      "responsible_role_id": "ROLE-TURN-COORD",
+      "status": "CURRENT",
+      "effective_from": "2024-01-01T00:00:00Z",
+      "effective_to": null,
+      "truth_label": "MODELED"
+    }
+  ],
+  "incidents": [
+    {
+      "id": "INC-2024-0112-OPS-07",
+      "event_id": "EVT-BAG-0836",
+      "affected_flight_id": "UA1414-IN",
+      "downstream_flight_id": "UA2672-OUT",
+      "owner_team_id": "TEAM-TURN",
+      "responsible_role_id": "ROLE-TURN-COORD",
+      "status": "MONITORING",
+      "opened_at": "2024-01-12T14:36:00Z",
+      "truth_label": "MODELED"
+    }
+  ],
+  "shift_handoffs": [
+    {
+      "id": "SHIFT-HANDOFF-2024-0112-A",
+      "references_incident_id": "INC-2024-0112-OPS-07",
+      "owner_team_id": "TEAM-OPS-CONTROL",
+      "responsible_role_id": "ROLE-DUTY-MANAGER",
+      "created_at": "2024-01-12T14:50:00Z",
+      "fresh_until": "2024-01-12T16:50:00Z",
+      "truth_label": "MODELED"
+    }
+  ]
+}
+

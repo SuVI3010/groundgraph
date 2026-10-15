@@ -22,7 +22,18 @@
         "length_ft": 10800,
         "role": "ARRIVAL",
         "capacity_per_hour": 24,
-        "status": "LIMITED"
+        "status": "LIMITED",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
       },
       {
         "id": "RWY-10L-28R",
@@ -30,7 +41,18 @@
         "length_ft": 13000,
         "role": "DEPARTURE",
         "capacity_per_hour": 30,
-        "status": "OPEN"
+        "status": "OPEN",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
       },
       {
         "id": "RWY-09R-27L",
@@ -38,14 +60,85 @@
         "length_ft": 11260,
         "role": "MIXED",
         "capacity_per_hour": 18,
-        "status": "STANDBY"
+        "status": "STANDBY",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
       }
     ],
     "gates": [
-      {"id": "C12", "terminal": "1-C", "status": "OCCUPIED", "compatible_classes": ["NARROWBODY"]},
-      {"id": "C14", "terminal": "1-C", "status": "OCCUPIED", "compatible_classes": ["NARROWBODY"]},
-      {"id": "C16", "terminal": "1-C", "status": "OCCUPIED", "compatible_classes": ["NARROWBODY"]},
-      {"id": "C18", "terminal": "1-C", "status": "AVAILABLE", "compatible_classes": ["NARROWBODY"]}
+      {
+        "id": "C12",
+        "terminal": "1-C",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "C14",
+        "terminal": "1-C",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "C16",
+        "terminal": "1-C",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "C18",
+        "terminal": "1-C",
+        "status": "AVAILABLE",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      }
     ]
   },
   "flights": [
@@ -62,7 +155,23 @@
       "rotation_id": "ROT-UA373-UA2445",
       "turn_minutes": 45,
       "bag_risk": "LOW",
-      "source_kind": "OBSERVED"
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
     },
     {
       "id": "UA2445-OUT",
@@ -77,7 +186,23 @@
       "rotation_id": "ROT-UA373-UA2445",
       "turn_minutes": 45,
       "bag_risk": "LOW",
-      "source_kind": "OBSERVED"
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
     },
     {
       "id": "UA1888-IN",
@@ -92,7 +217,23 @@
       "rotation_id": "ROT-UA1888-UA1071",
       "turn_minutes": 45,
       "bag_risk": "MEDIUM",
-      "source_kind": "OBSERVED"
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
     },
     {
       "id": "UA1071-OUT",
@@ -107,7 +248,23 @@
       "rotation_id": "ROT-UA1888-UA1071",
       "turn_minutes": 45,
       "bag_risk": "LOW",
-      "source_kind": "OBSERVED"
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
     },
     {
       "id": "UA1414-IN",
@@ -122,7 +279,23 @@
       "rotation_id": "ROT-UA1414-UA2672",
       "turn_minutes": 45,
       "bag_risk": "HIGH",
-      "source_kind": "OBSERVED"
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
     },
     {
       "id": "UA2672-OUT",
@@ -137,7 +310,23 @@
       "rotation_id": "ROT-UA1414-UA2672",
       "turn_minutes": 45,
       "bag_risk": "HIGH",
-      "source_kind": "OBSERVED"
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
     }
   ],
   "events": [
@@ -151,8 +340,21 @@
       "delay_minutes": 18,
       "capacity_delta": -8,
       "summary": "KORD reports 3/4 mile visibility, snow and mist; arrival capacity is constrained in the replay model.",
-      "source_kind": "OBSERVED",
-      "source_id": "NOAA-KORD-2024-01-12T08:00"
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KORD-2024-01-12T08:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
     },
     {
       "id": "EVT-BAG-0836",
@@ -164,7 +366,20 @@
       "delay_minutes": 12,
       "summary": "A modeled baggage scan mismatch extends the UA1414 to UA2672 turnaround from 45 to 57 minutes.",
       "source_kind": "MODELED",
-      "source_id": "MODEL-GROUND-OPS-V1"
+      "source_id": "MODEL-GROUND-OPS-V1",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [],
+      "modeled_fields": [
+        "at_minute",
+        "type",
+        "severity",
+        "flight_id",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary",
+        "source_id"
+      ]
     },
     {
       "id": "EVT-WX-0904",
@@ -176,8 +391,21 @@
       "delay_minutes": 0,
       "capacity_delta": 6,
       "summary": "The 09:04 KORD SPECI reports visibility improving to 2 miles, triggering an event-driven replan.",
-      "source_kind": "OBSERVED",
-      "source_id": "NOAA-KORD-2024-01-12T09:04"
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KORD-2024-01-12T09:04",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
     },
     {
       "id": "EVT-RWY-0912",
@@ -190,7 +418,20 @@
       "capacity_delta": -4,
       "summary": "A modeled ten-minute runway occupancy inspection temporarily reduces departure throughput.",
       "source_kind": "MODELED",
-      "source_id": "MODEL-RUNWAY-EVENT-V1"
+      "source_id": "MODEL-RUNWAY-EVENT-V1",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [],
+      "modeled_fields": [
+        "at_minute",
+        "type",
+        "severity",
+        "flight_id",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary",
+        "source_id"
+      ]
     }
   ],
   "policies": [
@@ -202,8 +443,10 @@
       "current": false,
       "effective_at": "2023-11-01",
       "owner": "Ramp Control",
-      "source": "Synthetic ORD Operations Handbook §4.2",
-      "action_types": ["REASSIGN_GATE"],
+      "source": "Synthetic ORD Operations Handbook \u00a74.2",
+      "action_types": [
+        "REASSIGN_GATE"
+      ],
       "rule": "An available compatible gate may be assigned after conflict and tow checks.",
       "source_kind": "MODELED"
     },
@@ -215,8 +458,10 @@
       "current": true,
       "effective_at": "2024-01-01",
       "owner": "Ramp Control",
-      "source": "Synthetic ORD Operations Handbook §4.2",
-      "action_types": ["REASSIGN_GATE"],
+      "source": "Synthetic ORD Operations Handbook \u00a74.2",
+      "action_types": [
+        "REASSIGN_GATE"
+      ],
       "rule": "An available compatible gate may be assigned when the occupancy window is clear and the operation remains inside the planning horizon.",
       "supersedes": "PROC-GATE-1.2",
       "source_kind": "MODELED"
@@ -229,8 +474,11 @@
       "current": true,
       "effective_at": "2024-01-01",
       "owner": "Flow Management",
-      "source": "Synthetic ORD Operations Handbook §6.1",
-      "action_types": ["RESERVE_SLOT", "RESEQUENCE_DEPARTURE"],
+      "source": "Synthetic ORD Operations Handbook \u00a76.1",
+      "action_types": [
+        "RESERVE_SLOT",
+        "RESEQUENCE_DEPARTURE"
+      ],
       "rule": "A protected departure slot must be unique, open, and linked to the active capacity resource.",
       "source_kind": "MODELED"
     },
@@ -242,8 +490,11 @@
       "current": true,
       "effective_at": "2024-01-01",
       "owner": "Turnaround Control",
-      "source": "Synthetic ORD Operations Handbook §7.4",
-      "action_types": ["RESEQUENCE_TASKS", "PROTECT_ROTATION"],
+      "source": "Synthetic ORD Operations Handbook \u00a77.4",
+      "action_types": [
+        "RESEQUENCE_TASKS",
+        "PROTECT_ROTATION"
+      ],
       "rule": "Independent tasks may run concurrently, while all dependency edges and minimum task durations remain binding.",
       "source_kind": "MODELED"
     },
@@ -256,7 +507,9 @@
       "effective_at": "2024-01-01",
       "owner": "Airport Operations Center",
       "source": "Synthetic Shift Bulletin 2024-01-12-A",
-      "action_types": ["APPLY_VALIDATED_PLAN"],
+      "action_types": [
+        "APPLY_VALIDATED_PLAN"
+      ],
       "rule": "The system may automatically apply a validated plan only within modeled replay scope, with current graph state and a complete audit trail.",
       "source_kind": "MODELED"
     }

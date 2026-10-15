@@ -1,0 +1,68 @@
+{
+  "manifest_version": "1.0",
+  "scenario_id": "ORD-2024-01-12-WINTER-AM",
+  "scenario_file": {
+    "path": "data/scenario.json",
+    "sha256": "9e46dcc51008ff6e51da3ba5982d7cb69ff194c7a6b3838fca33dc58c685fbb4"
+  },
+  "knowledge_file": {
+    "path": "knowledge/manifest.json",
+    "sha256": "3f508ed418b19bf03e0acd8abf1b842131fbc84b11484ea000921e643b205ac7"
+  },
+  "truth_classes": {
+    "OBSERVED": "A value selected from a named public source.",
+    "DERIVED": "A reproducible transformation or relationship computed from sourced data.",
+    "MODELED": "A synthetic assumption used only in the bounded replay.",
+    "MIXED": "A record containing explicitly enumerated observed and modeled fields."
+  },
+  "sources": [
+    {
+      "id": "BTS-2024-01",
+      "publisher": "U.S. Bureau of Transportation Statistics",
+      "title": "On-Time Performance, January 2024",
+      "url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2024_1.zip",
+      "use": "Six ORD schedule identities, directions, routes, and scheduled movement times.",
+      "public_timing": "POST_EVENT_ARCHIVE",
+      "decision_boundary": "Only schedule fields are projected into the replay. Actual times, cancellations, diversions, and delay outcomes are excluded from agent decisions.",
+      "truth_class": "OBSERVED"
+    },
+    {
+      "id": "NOAA-KORD-2024",
+      "publisher": "NOAA/NCEI",
+      "title": "Global Hourly KORD observations, 2024",
+      "url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2024/72530094846.csv",
+      "use": "KORD observations at 08:00 and 09:04 CST, including visibility, wind, ceiling, and present weather.",
+      "decision_boundary": "Each observation becomes available only when the replay clock reaches its observation time.",
+      "truth_class": "OBSERVED"
+    },
+    {
+      "id": "FAA-NASR-2023-12-28",
+      "publisher": "Federal Aviation Administration",
+      "title": "NASR airport and runway records",
+      "url": "https://nfdc.faa.gov/webContent/28DaySub/extra/28_Dec_2023_APT_CSV.zip",
+      "use": "ORD identity plus displayed runway designators and published lengths.",
+      "decision_boundary": "The top-down screen is schematic; it does not claim surveyed taxiway geometry.",
+      "truth_class": "OBSERVED"
+    },
+    {
+      "id": "MODEL-GROUNDGRAPH-V1",
+      "publisher": "GroundGraph team",
+      "title": "Bounded replay assumptions",
+      "url": "docs/data-provenance.md",
+      "use": "Gate occupancy and compatibility, capacity effects, task times, baggage event, runway inspection, recovery actions, projected outcomes, and synthetic organizational policy.",
+      "truth_class": "MODELED"
+    }
+  ],
+  "derived_relationships": [
+    {
+      "relationship": "ROTATES_TO",
+      "method": "Flights paired using post-event BTS tail continuity for a retrospective replay.",
+      "decision_boundary": "Treated as a modeled replay assumption rather than publicly available 09:00 operational evidence."
+    },
+    {
+      "relationship": "SUPERSEDES",
+      "method": "Declared by the synthetic versioned policy pack.",
+      "decision_boundary": "Used only to demonstrate Company Brain freshness and authorization behavior."
+    }
+  ]
+}
