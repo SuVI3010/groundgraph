@@ -18,7 +18,7 @@ GroundGraph enters all three official tracks as one product. The same continuous
 
 **Judge-visible proof:** Open one cycle and show all six graph-persisted handoffs with unique IDs, overlapping timestamps, distinct query names, evidence IDs, one input version, and consumed status. Apply one plan, restart the replay, and show its episode, plan, actions, outcome, and memory remain connected alongside the same six handoff IDs and their producer-run and finding chains. Trigger the same disruption again and show whether the context-matched memory adjusted or changed the new ranking. This persistence proof is for the applied episode; it does not claim that every no-action cycle is restored.
 
-**Stored proof:** `cypher/02_agent_handoffs.cypher`, `cypher/04_memory_influence.cypher`, and `cypher/05_replanning_history.cypher`.
+**Stored proof:** `cypher/02_agent_handoffs.cypher`, `cypher/04_memory_influence.cypher`, and `cypher/05_replanning_history.cypher`. The handoff query anchors on `DecisionEpisode-[:CONSUMED_HANDOFF]→Handoff` and returns episode, run, finding, evidence, version, timing, duration, and consumption identifiers. The corresponding MCP tools accept the same exact `episode_id`; cycle-only compatibility calls resolve a single newest episode.
 
 **Failure proof:** Submit an old plan after a new event increments `Scenario.state_version`; apply rejects it as stale. Trigger a weather-only context after creating baggage memory; the unrelated memory stays visible but does not influence ranking.
 

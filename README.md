@@ -59,7 +59,7 @@ In the judged server mode, loss of FalkorDB makes the replay API unavailable: re
 
 The complete acceptance matrix is in [Three-track coverage](docs/track-coverage.md). Copy-paste graph queries live in [`cypher/`](cypher/).
 
-The bundled [`mcp_server.py`](mcp_server.py) exposes six allowlisted stdio tools: `inspect_disruption`, `get_agent_handoffs`, `get_coordinator_trace`, `recall_episode`, `get_current_policy`, and `validate_candidate`. This optional integration surface returns graph evidence and keeps plan execution behind the deterministic application guard.
+The bundled [`mcp_server.py`](mcp_server.py) exposes six allowlisted stdio tools: `inspect_disruption`, `get_agent_handoffs`, `get_coordinator_trace`, `recall_episode`, `get_current_policy`, and `validate_candidate`. Handoff and coordinator-trace reads resolve one exact `episode_id`; cycle-only calls select the newest episode at that cycle for legacy callers, so replay resets cannot mix two runs with the same cycle number. This optional integration surface returns graph evidence and keeps plan execution behind the deterministic application guard.
 
 ## Architecture
 

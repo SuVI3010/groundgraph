@@ -46,9 +46,15 @@ def test_mcp_lists_bounded_read_tools_and_live_validation_rechecks_graph(
     assert specs["get_agent_handoffs"]["inputSchema"]["properties"]["limit"][
         "maximum"
     ] == 6
+    assert specs["get_agent_handoffs"]["inputSchema"]["properties"]["episode_id"][
+        "maxLength"
+    ] == 160
     assert specs["get_coordinator_trace"]["inputSchema"]["properties"]["limit"][
         "maximum"
     ] == 8
+    assert specs["get_coordinator_trace"]["inputSchema"]["properties"]["episode_id"][
+        "maxLength"
+    ] == 160
     assert specs["recall_episode"]["inputSchema"]["properties"]["limit"][
         "maximum"
     ] == 10
@@ -109,6 +115,8 @@ def test_cycle_handoffs_and_coordinator_trace_are_persisted_graph_records(
 
     payload = server.call_tool("get_agent_handoffs", {"cycle": cycle})
     assert payload["requested_cycle"] == cycle
+    assert payload["episode_id"] == snapshot["current_plan"]["episode_id"]
+    assert payload["episode_resolution"] == "latest_episode_for_cycle"
     assert payload["handoff_count"] == 6
     assert payload["complete_specialist_set"] is True
     assert payload["state_versions"] == [based_on_version]
@@ -116,6 +124,11 @@ def test_cycle_handoffs_and_coordinator_trace_are_persisted_graph_records(
     assert len({item["query_name"] for item in payload["handoffs"]}) == 6
     assert {item["status"] for item in payload["handoffs"]} == {"CONSUMED"}
     assert all(item["started_at"] and item["ended_at"] for item in payload["handoffs"])
+    assert {item["episode_id"] for item in payload["handoffs"]} == {
+        payload["episode_id"]
+    }
+    assert len({item["agent_run_id"] for item in payload["handoffs"]}) == 6
+    assert len({item["finding_id"] for item in payload["handoffs"]}) == 6
 
     for handoff in payload["handoffs"]:
         rows = supervised_engine.backend.query(
@@ -125,6 +138,8 @@ def test_cycle_handoffs_and_coordinator_trace_are_persisted_graph_records(
 
     trace = server.call_tool("get_coordinator_trace", {"cycle": cycle})
     assert trace["requested_cycle"] == cycle
+    assert trace["episode_id"] == snapshot["current_plan"]["episode_id"]
+    assert trace["episode_resolution"] == "latest_episode_for_cycle"
     assert trace["runtime_trace"] == "persisted_falkordb_toolcall_nodes"
     assert "do not assert an external MCP network round trip" in trace[
         "transport_note"
@@ -162,13 +177,131 @@ def test_cycle_handoffs_and_coordinator_trace_are_persisted_graph_records(
         ]
     ) <= 8
     assert server.call_tool("get_agent_handoffs", {"cycle": cycle + 999}) == {
+        "requested_episode_id": None,
         "requested_cycle": cycle + 999,
+        "episode_id": None,
+        "resolved_cycle": None,
+        "episode_resolution": "cycle_not_found",
         "handoffs": [],
         "handoff_count": 0,
         "complete_specialist_set": False,
         "state_versions": [],
         "evidence_ids": [],
     }
+
+
+def test_episode_selector_prevents_cross_episode_mixing_after_cycle_reuse(
+    automatic_engine: GroundGraphEngine,
+):
+    first = automatic_engine.tick(to_minute=5)
+    cycle = first["clock"]["cycle"]
+    old_episode_id = first["current_plan"]["episode_id"]
+    old_handoff_ids = {
+        item["id"]
+        for item in first["handoffs"]
+        if item["episode_id"] == old_episode_id
+    }
+    old_tool_ids = {
+        item["id"]
+        for item in first["tool_trace"]
+        if item["episode_id"] == old_episode_id
+    }
+
+    automatic_engine.reset(preserve_memory=True)
+    second = automatic_engine.tick(to_minute=5)
+    new_episode_id = second["current_plan"]["episode_id"]
+    assert new_episode_id != old_episode_id
+    assert second["clock"]["cycle"] == cycle
+    new_handoff_ids = {
+        item["id"]
+        for item in second["handoffs"]
+        if item["episode_id"] == new_episode_id
+    }
+    new_tool_ids = {
+        item["id"]
+        for item in second["tool_trace"]
+        if item["episode_id"] == new_episode_id
+    }
+    assert len(old_handoff_ids) == len(new_handoff_ids) == 6
+    assert len(old_tool_ids) == len(new_tool_ids) == 4
+
+    server = GroundGraphMCP(automatic_engine)
+    legacy_handoffs = server.call_tool("get_agent_handoffs", {"cycle": cycle})
+    legacy_trace = server.call_tool("get_coordinator_trace", {"cycle": cycle})
+    assert legacy_handoffs["episode_id"] == new_episode_id
+    assert legacy_trace["episode_id"] == new_episode_id
+    assert {item["id"] for item in legacy_handoffs["handoffs"]} == new_handoff_ids
+    assert {item["id"] for item in legacy_trace["tool_calls"]} == new_tool_ids
+    assert {item["episode_id"] for item in legacy_handoffs["handoffs"]} == {
+        new_episode_id
+    }
+    assert {item["episode_id"] for item in legacy_trace["tool_calls"]} == {
+        new_episode_id
+    }
+    assert {item["episode_id"] for item in legacy_trace["model_runs"]} == {
+        new_episode_id
+    }
+
+    for episode_id, handoff_ids, tool_ids in (
+        (old_episode_id, old_handoff_ids, old_tool_ids),
+        (new_episode_id, new_handoff_ids, new_tool_ids),
+    ):
+        handoffs = server.call_tool("get_agent_handoffs", {"episode_id": episode_id})
+        trace = server.call_tool("get_coordinator_trace", {"episode_id": episode_id})
+        assert handoffs["requested_episode_id"] == episode_id
+        assert handoffs["requested_cycle"] is None
+        assert handoffs["episode_id"] == episode_id
+        assert handoffs["resolved_cycle"] == cycle
+        assert handoffs["episode_resolution"] == "explicit_episode_id"
+        assert {item["id"] for item in handoffs["handoffs"]} == handoff_ids
+        assert {item["episode_id"] for item in handoffs["handoffs"]} == {
+            episode_id
+        }
+        assert trace["requested_episode_id"] == episode_id
+        assert trace["requested_cycle"] is None
+        assert trace["episode_id"] == episode_id
+        assert trace["resolved_cycle"] == cycle
+        assert trace["episode_resolution"] == "explicit_episode_id"
+        assert {item["id"] for item in trace["tool_calls"]} == tool_ids
+        assert {item["episode_id"] for item in trace["tool_calls"]} == {
+            episode_id
+        }
+        assert trace["model_run_count"] == 1
+        assert trace["model_runs"][0]["episode_id"] == episode_id
+
+    newest_by_default = server.call_tool("get_coordinator_trace")
+    assert newest_by_default["episode_id"] == new_episode_id
+
+    limited = server.call_tool(
+        "get_agent_handoffs", {"episode_id": old_episode_id, "limit": 1}
+    )
+    assert len(limited["handoffs"]) == 1
+    assert limited["handoffs"][0]["episode_id"] == old_episode_id
+
+    with pytest.raises(ValueError, match="cycle does not match"):
+        server.call_tool(
+            "get_agent_handoffs",
+            {"episode_id": old_episode_id, "cycle": cycle + 1},
+        )
+    with pytest.raises(ValueError, match="cycle does not match"):
+        server.call_tool(
+            "get_coordinator_trace",
+            {"episode_id": old_episode_id, "cycle": cycle + 1},
+        )
+
+    missing_handoffs = server.call_tool(
+        "get_agent_handoffs", {"episode_id": "EPISODE-DOES-NOT-EXIST"}
+    )
+    missing_trace = server.call_tool(
+        "get_coordinator_trace", {"episode_id": "EPISODE-DOES-NOT-EXIST"}
+    )
+    assert missing_handoffs["episode_id"] is None
+    assert missing_handoffs["episode_resolution"] == "episode_not_found"
+    assert missing_handoffs["handoffs"] == []
+    assert missing_trace["episode_id"] is None
+    assert missing_trace["episode_resolution"] == "episode_not_found"
+    assert missing_trace["tool_calls"] == []
+    assert missing_trace["model_runs"] == []
 
 
 def test_contextual_memory_and_policy_tools_return_bounded_graph_evidence(

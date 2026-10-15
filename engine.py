@@ -1211,6 +1211,159 @@ class GroundGraphEngine:
             }
         return list(traces.values())
 
+    def _applied_policy_evidence(self) -> dict[str, Any]:
+        """Capture the exact knowledge subgraph used by applied actions."""
+
+        rows = self.backend.query(
+            "MATCH (:DecisionEpisode)-[:SELECTED]->(plan:Plan)-[:PROPOSES]->"
+            "(action:Action) WHERE plan.status = 'APPLIED' "
+            "OPTIONAL MATCH (action)-[:AUTHORIZED_BY]->(policy:Policy) "
+            "OPTIONAL MATCH (action)-[:SUPPORTED_BY]->"
+            "(procedure:ProcedureVersion) RETURN action.id, action.status, "
+            "action.policy_id, policy.id, procedure.id"
+        ).result_set
+        action_records: dict[str, dict[str, Any]] = {}
+        roots: set[str] = set()
+        for row in rows:
+            action_id = str(row[0])
+            policy_id = str(row[3] or row[2] or "")
+            procedure_id = str(row[4] or "")
+            action_records[action_id] = {
+                "status": row[1],
+                "policy_id": policy_id,
+                "procedure_id": procedure_id,
+            }
+            roots.update(
+                value for value in (policy_id, procedure_id) if value
+            )
+
+        allowed_labels = {
+            "Policy", "ProcedureVersion", "SourceDocument", "Team", "Role"
+        }
+        allowed_relationships = {
+            "ALIGNED_WITH", "IN_DOCUMENT", "OWNED_BY", "RESPONSIBLE_ROLE",
+            "SUPERSEDES",
+        }
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: set[tuple[str, str, str]] = set()
+        pending = list(roots)
+        visited: set[str] = set()
+        while pending:
+            node_id = pending.pop()
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            graph_rows = self.backend.query(
+                "MATCH (node {id: $id}) "
+                "OPTIONAL MATCH (node)-[edge]->(target) RETURN "
+                "labels(node), properties(node), type(edge), labels(target), "
+                "properties(target)",
+                {"id": node_id},
+            ).result_set
+            for graph_row in graph_rows:
+                source_labels = [
+                    str(label) for label in list(graph_row[0] or [])
+                    if str(label) in allowed_labels
+                ]
+                source_properties = dict(graph_row[1] or {})
+                source_id = str(source_properties.get("id", ""))
+                if not source_id or not source_labels:
+                    continue
+                nodes[source_id] = {
+                    "labels": source_labels,
+                    "properties": source_properties,
+                }
+                relationship = str(graph_row[2] or "")
+                target_labels = [
+                    str(label) for label in list(graph_row[3] or [])
+                    if str(label) in allowed_labels
+                ]
+                target_properties = dict(graph_row[4] or {})
+                target_id = str(target_properties.get("id", ""))
+                if (
+                    relationship not in allowed_relationships
+                    or not target_id
+                    or not target_labels
+                ):
+                    continue
+                nodes[target_id] = {
+                    "labels": target_labels,
+                    "properties": target_properties,
+                }
+                edges.add((source_id, relationship, target_id))
+                if target_id not in visited:
+                    pending.append(target_id)
+        return {
+            "actions": action_records,
+            "nodes": list(nodes.values()),
+            "edges": sorted(edges),
+        }
+
+    def _applied_memory_recall_edges(self) -> list[tuple[str, str]]:
+        rows = self.backend.query(
+            "MATCH (episode:DecisionEpisode)-[:SELECTED]->(plan:Plan) "
+            "WHERE plan.status = 'APPLIED' "
+            "MATCH (episode)-[:RECALLED]->(memory:Memory) "
+            "RETURN episode.id, memory.id ORDER BY episode.created_at, memory.id"
+        ).result_set
+        return [(str(row[0]), str(row[1])) for row in rows]
+
+    def _upsert_evidence_node(self, node: Mapping[str, Any]) -> None:
+        allowed_labels = {
+            "Policy", "ProcedureVersion", "SourceDocument", "Team", "Role"
+        }
+        label = next(
+            (
+                str(value) for value in node.get("labels", [])
+                if str(value) in allowed_labels
+            ),
+            "",
+        )
+        properties = dict(node.get("properties", {}))
+        node_id = str(properties.get("id", ""))
+        if not label or not node_id:
+            return
+        label = _safe_identifier(label)
+        exists = self.backend.query(
+            f"MATCH (node:{label} {{id: $id}}) RETURN count(node)",
+            {"id": node_id},
+        ).result_set
+        if not exists or int(exists[0][0]) == 0:
+            self._create_node(label, properties)
+            return
+        assignments: list[str] = []
+        params: dict[str, Any] = {"id": node_id}
+        for index, (raw_key, raw_value) in enumerate(properties.items()):
+            key = _safe_identifier(str(raw_key))
+            if key == "id" or raw_value is None:
+                continue
+            parameter = f"value{index}"
+            assignments.append(f"node.{key} = ${parameter}")
+            params[parameter] = self._scalar(raw_value)
+        if assignments:
+            self.backend.query(
+                f"MATCH (node:{label} {{id: $id}}) SET "
+                + ", ".join(assignments),
+                params,
+            )
+
+    def _ensure_edge(self, source: str, relationship: str, target: str) -> None:
+        relationship = _safe_identifier(relationship)
+        rows = self.backend.query(
+            "MATCH (source {id: $source})-[edge:"
+            + relationship
+            + "]->(target {id: $target}) RETURN count(edge)",
+            {"source": source, "target": target},
+        ).result_set
+        if not rows or int(rows[0][0]) == 0:
+            self._create_edge(source, relationship, target)
+
+    def _restore_policy_evidence(self, evidence: Mapping[str, Any]) -> None:
+        for node in evidence.get("nodes", []):
+            self._upsert_evidence_node(node)
+        for source, relationship, target in evidence.get("edges", []):
+            self._ensure_edge(str(source), str(relationship), str(target))
+
     def _handoffs(self, limit: int = 60) -> list[dict[str, Any]]:
         rows = self.backend.query(
             "MATCH (h:Handoff) "
@@ -2484,10 +2637,22 @@ class GroundGraphEngine:
                 if relationship:
                     self._create_edge(str(action["id"]), relationship, target_id)
             if action.get("policy_id"):
+                policy_id = str(action["policy_id"])
                 self._create_edge(
-                    str(action["id"]), "AUTHORIZED_BY", str(action["policy_id"])
+                    str(action["id"]), "AUTHORIZED_BY", policy_id
                 )
-                aligned = policy_index.get(action_type, {}).get("procedure_id")
+                exact_rows = self.backend.query(
+                    "MATCH (policy:Policy {id: $id}) "
+                    "OPTIONAL MATCH (policy)-[:ALIGNED_WITH]->"
+                    "(procedure:ProcedureVersion) RETURN procedure.id, "
+                    "policy.procedure_id ORDER BY procedure.id LIMIT 1",
+                    {"id": policy_id},
+                ).result_set
+                aligned = (
+                    (exact_rows[0][0] or exact_rows[0][1])
+                    if exact_rows
+                    else policy_index.get(action_type, {}).get("procedure_id")
+                )
                 if aligned:
                     self._create_edge(str(action["id"]), "SUPPORTED_BY", str(aligned))
 
@@ -3211,9 +3376,18 @@ class GroundGraphEngine:
                 if preserve_memory
                 else []
             )
+            policy_evidence = (
+                self._applied_policy_evidence() if preserve_memory else {}
+            )
+            recall_edges = (
+                self._applied_memory_recall_edges() if preserve_memory else []
+            )
             retained = self._memories(limit=100) if preserve_memory and not lineages else []
             self._seed()
+            if policy_evidence:
+                self._restore_policy_evidence(policy_evidence)
             policy_index = self._policy_index(self._policies())
+            action_records = dict(policy_evidence.get("actions", {}))
             restored_episode_ids: set[str] = set()
             for lineage in reversed(lineages):
                 episode = lineage["episode"]
@@ -3278,6 +3452,7 @@ class GroundGraphEngine:
                     },
                 )
                 self._create_edge(episode["id"], "SELECTED", plan_record["id"])
+                self._create_edge(episode["id"], "ANALYZED", self.scenario_id)
                 self._create_edge(plan_record["id"], "RESULTED_IN", outcome["id"])
                 self._create_edge(memory["id"], "REMEMBERS", outcome["id"])
                 self._create_edge("AGENT-COORD", "STORED", memory["id"])
@@ -3288,6 +3463,31 @@ class GroundGraphEngine:
                     policy_index,
                     str(plan_record["created_at"] or _utc_now()),
                 )
+                for action in plan_payload.get("actions", []):
+                    action_id = str(action.get("id", ""))
+                    action_record = action_records.get(action_id, {})
+                    policy_id = str(action_record.get("policy_id") or "")
+                    procedure_id = str(action_record.get("procedure_id") or "")
+                    if action_id and policy_id:
+                        self.backend.query(
+                            "MATCH (action:Action {id: $id})"
+                            "-[edge:AUTHORIZED_BY]->() DELETE edge",
+                            {"id": action_id},
+                        )
+                        self._ensure_edge(action_id, "AUTHORIZED_BY", policy_id)
+                    if action_id and procedure_id:
+                        self.backend.query(
+                            "MATCH (action:Action {id: $id})"
+                            "-[edge:SUPPORTED_BY]->() DELETE edge",
+                            {"id": action_id},
+                        )
+                        self._ensure_edge(action_id, "SUPPORTED_BY", procedure_id)
+                    status = action_record.get("status")
+                    if action_id and status:
+                        self.backend.query(
+                            "MATCH (action:Action {id: $id}) SET action.status = $status",
+                            {"id": action_id, "status": status},
+                        )
             for lineage in handoff_lineages:
                 episode_id = str(lineage["episode_id"])
                 if episode_id not in restored_episode_ids:
@@ -3414,6 +3614,9 @@ class GroundGraphEngine:
                 )
                 self._create_edge(str(item["id"]), "REMEMBERS", outcome_id)
                 self._create_edge("AGENT-COORD", "STORED", str(item["id"]))
+            for episode_id, memory_id in recall_edges:
+                if episode_id in restored_episode_ids:
+                    self._ensure_edge(episode_id, "RECALLED", memory_id)
             return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:

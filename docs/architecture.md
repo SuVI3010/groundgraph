@@ -64,7 +64,7 @@ This design minimizes intervention without hiding authority: monitoring, impact 
 
 ## MCP tool surface
 
-`mcp_server.py` exposes six allowlisted stdio tools: `inspect_disruption`, `get_agent_handoffs`, `get_coordinator_trace`, `recall_episode`, `get_current_policy`, and `validate_candidate`. These tools return bounded graph evidence. They do not execute a plan; application stays behind the Flask API and the same graph-version, policy, knowledge, freeze, benefit, and churn checks used by the command center.
+`mcp_server.py` exposes six allowlisted stdio tools: `inspect_disruption`, `get_agent_handoffs`, `get_coordinator_trace`, `recall_episode`, `get_current_policy`, and `validate_candidate`. Handoff and coordinator-trace tools are scoped to one `DecisionEpisode`: callers can pass its exact `episode_id`, while a cycle-only request deterministically resolves the newest episode for that cycle. This prevents records from separate replay generations with reused cycle numbers from being combined. These tools return bounded graph evidence. They do not execute a plan; application stays behind the Flask API and the same graph-version, policy, knowledge, freeze, benefit, and churn checks used by the command center.
 
 The coordinator also persists its bounded inspection, policy lookup, contextual recall, and validation calls as `ToolCall` nodes linked from the active `DecisionEpisode`. This makes the model-facing evidence sequence inspectable without granting a tool permission to execute a plan.
 

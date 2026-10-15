@@ -42,11 +42,14 @@ TOOL_SPECS = [
         "name": "get_agent_handoffs",
         "description": (
             "Read up to six graph-persisted specialist handoffs for one "
-            "replanning cycle, including evidence, query timing, and consumption status."
+            "decision episode, including evidence, query timing, and consumption "
+            "status. Pass episode_id for an exact episode; cycle-only calls resolve "
+            "the newest episode in that cycle."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "episode_id": {"type": "string", "minLength": 1, "maxLength": 160},
                 "cycle": {"type": "integer", "minimum": 0},
                 "limit": {
                     "type": "integer",
@@ -61,12 +64,15 @@ TOOL_SPECS = [
     {
         "name": "get_coordinator_trace",
         "description": (
-            "Read persisted coordinator ToolCall records for one cycle. This is "
-            "the auditable trace of the shared graph-tool contract."
+            "Read persisted coordinator ToolCall and ModelRun records for one "
+            "decision episode. Pass episode_id for an exact episode; cycle-only "
+            "calls resolve the newest episode in that cycle. This is the auditable "
+            "trace of the shared graph-tool contract."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "episode_id": {"type": "string", "minLength": 1, "maxLength": 160},
                 "cycle": {"type": "integer", "minimum": 0},
                 "limit": {
                     "type": "integer",
@@ -205,13 +211,86 @@ class GroundGraphMCP:
         except (TypeError, ValueError) as exc:
             raise ValueError("cycle must be a non-negative integer") from exc
 
-    def _handoffs_for_cycle(self, cycle: int) -> list[dict[str, Any]]:
+    def _episode_scope(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        """Resolve one exact decision episode for all episode-scoped MCP reads."""
+
+        raw_episode_id = args.get("episode_id")
+        if raw_episode_id is not None:
+            if not isinstance(raw_episode_id, str):
+                raise ValueError("episode_id must be a non-empty string")
+            requested_episode_id = raw_episode_id.strip()
+            if not requested_episode_id or len(requested_episode_id) > 160:
+                raise ValueError(
+                    "episode_id must be a non-empty string of at most 160 characters"
+                )
+            requested_cycle = (
+                self._requested_cycle(args) if "cycle" in args else None
+            )
+            rows = self.engine.backend.query(
+                "MATCH (d:DecisionEpisode {id: $episode}) "
+                "RETURN d.id, d.cycle, d.created_at",
+                {"episode": requested_episode_id},
+            ).result_set
+            if not rows:
+                return {
+                    "requested_episode_id": requested_episode_id,
+                    "requested_cycle": requested_cycle,
+                    "episode_id": None,
+                    "resolved_cycle": None,
+                    "episode_resolution": "episode_not_found",
+                }
+            episode_id = str(rows[0][0])
+            resolved_cycle = int(rows[0][1] or 0)
+            if requested_cycle is not None and requested_cycle != resolved_cycle:
+                raise ValueError(
+                    "cycle does not match the requested decision episode"
+                )
+            return {
+                "requested_episode_id": requested_episode_id,
+                "requested_cycle": requested_cycle,
+                "episode_id": episode_id,
+                "resolved_cycle": resolved_cycle,
+                "episode_resolution": "explicit_episode_id",
+            }
+
+        requested_cycle = self._requested_cycle(args)
         rows = self.engine.backend.query(
-            "MATCH (h:Handoff) WHERE h.cycle = $cycle RETURN h.id, "
+            "MATCH (d:DecisionEpisode) WHERE d.cycle = $cycle "
+            "RETURN d.id, d.cycle, d.created_at "
+            "ORDER BY d.created_at DESC, d.id DESC",
+            {"cycle": requested_cycle},
+        ).result_set
+        if not rows:
+            return {
+                "requested_episode_id": None,
+                "requested_cycle": requested_cycle,
+                "episode_id": None,
+                "resolved_cycle": None,
+                "episode_resolution": "cycle_not_found",
+            }
+        return {
+            "requested_episode_id": None,
+            "requested_cycle": requested_cycle,
+            "episode_id": str(rows[0][0]),
+            "resolved_cycle": int(rows[0][1] or 0),
+            "episode_resolution": "latest_episode_for_cycle",
+        }
+
+    def _handoffs_for_episode(self, episode_id: str | None) -> list[dict[str, Any]]:
+        if not episode_id:
+            return []
+        rows = self.engine.backend.query(
+            "MATCH (d:DecisionEpisode {id: $episode})-[:CONSUMED_HANDOFF]->"
+            "(h:Handoff) "
+            "MATCH (agent:Agent)-[:STARTED]->(run:AgentRun)-[:PRODUCED]->"
+            "(finding:Finding)-[:PACKAGED_AS]->(h) "
+            "MATCH (h)-[:DELIVERED_TO]->(:Agent {id: 'AGENT-COORD'}) "
+            "RETURN h.id, "
             "h.from_agent, h.to_agent, h.status, h.summary, h.evidence_ids, "
             "h.state_version, h.cycle, h.created_at, h.query_name, h.started_at, "
-            "h.ended_at, h.duration_ms, h.consumed_at ORDER BY h.id",
-            {"cycle": cycle},
+            "h.ended_at, h.duration_ms, h.consumed_at, d.id, run.id, finding.id "
+            "ORDER BY h.id",
+            {"episode": episode_id},
         ).result_set
         return [
             {
@@ -229,17 +308,22 @@ class GroundGraphMCP:
                 "ended_at": row[11],
                 "duration_ms": int(row[12] or 0),
                 "consumed_at": row[13],
+                "episode_id": row[14],
+                "agent_run_id": row[15],
+                "finding_id": row[16],
             }
             for row in rows[:MAX_HANDOFFS]
         ]
 
-    def _tool_trace_for_cycle(self, cycle: int) -> list[dict[str, Any]]:
+    def _tool_trace_for_episode(self, episode_id: str | None) -> list[dict[str, Any]]:
+        if not episode_id:
+            return []
         rows = self.engine.backend.query(
-            "MATCH (d:DecisionEpisode)-[:USED_TOOL]->(t:ToolCall) "
-            "WHERE t.cycle = $cycle RETURN t.id, t.name, t.transport, "
+            "MATCH (d:DecisionEpisode {id: $episode})-[:USED_TOOL]->(t:ToolCall) "
+            "RETURN t.id, t.name, t.transport, "
             "t.arguments_json, t.evidence_ids, t.result_summary, t.status, "
             "t.sequence, t.cycle, t.created_at, d.id ORDER BY t.sequence",
-            {"cycle": cycle},
+            {"episode": episode_id},
         ).result_set
         return [
             {
@@ -256,6 +340,38 @@ class GroundGraphMCP:
                 "episode_id": row[10],
             }
             for row in rows[:MAX_TOOL_CALLS]
+        ]
+
+    def _model_runs_for_episode(self, episode_id: str | None) -> list[dict[str, Any]]:
+        if not episode_id:
+            return []
+        rows = self.engine.backend.query(
+            "MATCH (d:DecisionEpisode {id: $episode})-[:USED_MODEL]->(m:ModelRun) "
+            "RETURN m.id, m.provider, m.model, m.selected_candidate_id, "
+            "m.allowlisted_candidate_ids, m.cost_direction, m.decision_source, "
+            "m.summary, m.created_at, d.id, d.cycle "
+            "ORDER BY m.created_at DESC, m.id DESC",
+            {"episode": episode_id},
+        ).result_set
+        return [
+            {
+                "id": row[0],
+                "provider": row[1],
+                "model": row[2],
+                "selected_candidate_id": row[3],
+                "allowlisted_candidate_ids": [
+                    str(value)
+                    for value in _as_list(row[4])
+                    if value not in (None, "")
+                ][:MAX_CANDIDATES],
+                "cost_direction": row[5],
+                "decision_source": row[6],
+                "summary": _bounded_text(row[7], 500),
+                "created_at": row[8],
+                "episode_id": row[9],
+                "cycle": int(row[10] or 0),
+            }
+            for row in rows[:1]
         ]
 
     @staticmethod
@@ -373,11 +489,11 @@ class GroundGraphMCP:
                 "source": "live_falkordb_snapshot",
             }
         if name == "get_agent_handoffs":
-            cycle = self._requested_cycle(args)
+            scope = self._episode_scope(args)
             limit = _bounded_int(args.get("limit"), MAX_HANDOFFS, MAX_HANDOFFS)
-            handoffs = self._handoffs_for_cycle(cycle)[:limit]
+            handoffs = self._handoffs_for_episode(scope["episode_id"])[:limit]
             return {
-                "requested_cycle": cycle,
+                **scope,
                 "handoffs": handoffs,
                 "handoff_count": len(handoffs),
                 "complete_specialist_set": (
@@ -392,16 +508,12 @@ class GroundGraphMCP:
                 ),
             }
         if name == "get_coordinator_trace":
-            cycle = self._requested_cycle(args)
+            scope = self._episode_scope(args)
             limit = _bounded_int(args.get("limit"), MAX_TOOL_CALLS, MAX_TOOL_CALLS)
-            calls = self._tool_trace_for_cycle(cycle)[:limit]
-            model_runs = [
-                item
-                for item in self.engine._model_trace(limit=10)
-                if int(item.get("cycle", -1)) == cycle
-            ][:1]
+            calls = self._tool_trace_for_episode(scope["episode_id"])[:limit]
+            model_runs = self._model_runs_for_episode(scope["episode_id"])
             return {
-                "requested_cycle": cycle,
+                **scope,
                 "tool_calls": calls,
                 "tool_call_count": len(calls),
                 "model_runs": model_runs,
