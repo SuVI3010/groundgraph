@@ -119,6 +119,16 @@ def create_app(engine: GroundGraphEngine | None = None) -> Flask:
             get_engine().reset(preserve_memory=bool(body.get("preserve_memory", True)))
         )
 
+    @app.post("/api/autonomy")
+    def autonomy():
+        body: dict[str, Any] = request.get_json(silent=True) or {}
+        if "enabled" not in body or not isinstance(body.get("enabled"), bool):
+            return jsonify({"ok": False, "error": "enabled must be a boolean"}), 400
+        try:
+            return jsonify(get_engine().set_autonomy(bool(body["enabled"])))
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+
     @app.post("/api/policies/supersede")
     def supersede_policy():
         body: dict[str, Any] = request.get_json(silent=True) or {}

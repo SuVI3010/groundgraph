@@ -14,6 +14,11 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
 
+if [[ "$MODE" == "lite" ]] && ! .venv/bin/python -c 'import redislite' >/dev/null 2>&1; then
+  echo "Installing the optional FalkorDBLite fallback..."
+  .venv/bin/pip install -r requirements-lite.txt
+fi
+
 set -a
 # shellcheck disable=SC1091
 source .env

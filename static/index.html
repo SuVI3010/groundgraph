@@ -43,7 +43,7 @@
       <section class="overview-rail" aria-label="Current operational picture">
         <article class="incident-summary" id="incident-summary">
           <span class="severity-symbol" aria-hidden="true">!</span>
-          <span><small>ACTIVE DISRUPTION <em class="provenance-tag mixed" id="incident-provenance" title="Observed source with a modeled operational effect">MIXED</em></small><strong id="incident-title">Baggage reconciliation delay entering the graph</strong><span id="incident-detail">UA1414 → UA2672 · 12-minute modeled turnaround variance</span></span>
+          <span><small><span id="incident-kicker">ACTIVE DISRUPTION</span><em class="provenance-tag mixed" id="incident-provenance" title="Observed source with a modeled operational effect">MIXED</em></small><strong id="incident-title">Baggage reconciliation delay entering the graph</strong><span id="incident-detail">UA1414 → UA2672 · 12-minute modeled turnaround variance</span></span>
         </article>
 
         <div class="metric-row" aria-label="Replay measures">
@@ -82,6 +82,7 @@
             <div class="map-topline">
               <span class="map-chip"><i class="cyan"></i><b id="airborne-count">0</b> airborne</span>
               <span class="map-chip"><i class="blue"></i><b id="taxi-count">0</b> taxiing</span>
+              <span class="map-chip"><i class="violet"></i><b id="gate-count">0</b> at gate</span>
               <span class="map-chip risk"><i class="amber"></i><b id="risk-count">0</b> at risk</span>
               <span class="map-chip protected"><i class="green"></i><b id="protected-count">0</b> protected</span>
             </div>
@@ -168,6 +169,7 @@
               <header><span><small id="plan-kicker">GRAPH-SAFE PLAN</small><strong id="plan-title">Recovery plan ready</strong></span><span class="plan-badges"><em id="plan-selector">SELECTOR NOT REPORTED</em><em id="plan-score">AWAITING CHECKS</em></span></header>
               <div class="action-list" id="action-list"></div>
               <div class="plan-reason" id="plan-reason"><span>WHY THIS PLAN</span><p id="plan-explanation">Waiting for graph-grounded explanation.</p></div>
+              <div class="decision-envelope" id="decision-envelope"></div>
             </div>
             <div class="cycles-stage" id="cycles-stage" hidden></div>
             <div class="evidence-stage" id="evidence-stage" hidden></div>
@@ -175,7 +177,7 @@
           </section>
 
           <footer class="autonomy-footer">
-            <label class="autonomy-toggle"><input id="auto-apply" type="checkbox" checked /><span></span><strong>Auto-apply after validator · <em>10-min churn guard</em></strong></label>
+            <label class="autonomy-toggle"><input id="auto-apply" type="checkbox" checked /><span></span><strong>Auto-apply after validator · <em id="auto-apply-state">server on · 10-min churn guard</em></strong></label>
             <button class="primary-action" id="primary-action" type="button"><span id="primary-action-label">Run replan now</span><b>→</b></button>
           </footer>
         </aside>
@@ -205,6 +207,26 @@
             <span><i>02</i><b>COORDINATE</b><small id="track-two-proof">Shared handoffs + memory</small></span>
             <span><i>03</i><b>KNOW</b><small id="track-three-proof">Current policy + owner</small></span>
           </div>
+        </article>
+
+        <article class="brain-card panel" aria-label="Ask Operations Brain">
+          <header class="compact-header brain-header">
+            <span><small>ASK OPERATIONS BRAIN <em class="provenance-tag derived">GRAPH ANSWER</em></small><strong>Operational knowledge, with proof</strong></span>
+            <span class="brain-status" id="brain-status"><i></i> ready</span>
+          </header>
+          <div class="brain-presets" aria-label="Suggested questions">
+            <button type="button" data-brain-question="Who owns the current gate reassignment policy?">Who owns gate recovery?</button>
+            <button type="button" data-brain-question="What happened in the current incident, and who is responsible?">Explain this incident</button>
+            <button type="button" data-brain-question="Which operating procedure is current, and what did it supersede?">Which procedure is current?</button>
+          </div>
+          <form class="brain-form" id="brain-form">
+            <label class="sr-only" for="brain-question">Ask about operational knowledge</label>
+            <input id="brain-question" name="question" type="text" autocomplete="off" placeholder="Ask about an owner, incident, or procedure…" />
+            <button id="brain-submit" type="submit"><span>Ask</span><b>→</b></button>
+          </form>
+          <section class="brain-answer" id="brain-answer" aria-live="polite">
+            <span class="brain-empty"><i>?</i><span><strong>Ask in plain language</strong><small>The answer will cite the connected policies, incidents, owners, and graph path it used.</small></span></span>
+          </section>
         </article>
       </section>
 

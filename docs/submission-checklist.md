@@ -5,8 +5,9 @@
 - [ ] Public repository URL is added to the README and submission form.
 - [x] Event-period repository is separate from the pre-event exploration prototype.
 - [x] Python dependency versions and judged server/model tags are recorded.
-- [x] `make audit` checks package completeness, provenance hashes, action contracts, and local documentation links offline.
+- [x] `make audit` checks package completeness, scenario/knowledge hashes, action contracts, and local documentation links offline.
 - [x] Official FalkorDB server start path is Podman-only; it does not use Docker Desktop or Colima.
+- [x] `make demo-check` verifies the exact official image, graph module, matching API/graph/endpoint, and a live local-model inference.
 - [x] FalkorDBLite fallback is labeled separately.
 - [x] Clean-clone instructions are documented.
 - [ ] Clean-clone setup is repeated on a second account or machine.
@@ -16,25 +17,35 @@
 - [x] Graph model is documented.
 - [x] Essential Cypher queries are included in `cypher/`.
 - [x] Public, derived, and modeled data are separated in a provenance manifest.
-- [ ] Mixed flight, runway, and weather records show field-level provenance clearly in the recorded demo.
+- [x] Exact selected BTS, NOAA, and FAA rows are checked in with source hashes and reproducible extraction instructions.
+- [x] Flights, runways, gates, events, and turnarounds have stable record-level `SOURCED_FROM` or `MODELED_BY` graph paths.
+- [ ] Mixed flight, runway, and weather records show field-level provenance clearly in the final recorded demo.
 - [x] All three tracks are declared with visible and stored proofs.
-- [x] Optional MCP tools are documented and covered by a bounded-surface test.
+- [x] All six optional MCP tools, including `get_coordinator_trace`, are documented and covered by a bounded-surface test.
 - [x] AI coding assistance and the product model are disclosed.
 - [ ] Disconnecting FalkorDB makes the server-mode API and mutations visibly unavailable; no browser simulation continues.
 - [ ] `/api/health` is captured with `runtime_mode: server`.
 - [x] Automated tests pass on the final release candidate.
 - [x] Fresh official-server run persists memory across application restart.
+- [x] The full safe non-dominated ranking, context-bounded `model_candidate_set`, and matching `ModelRun.allowlisted_candidate_ids` are persisted and tested.
+- [x] Applied-episode reset restores the full episode-plan-action-outcome-memory lineage, action evidence relationships, and the same six unique consumed `AgentRun → Finding → Handoff` chains.
+- [x] Context matching prevents a baggage episode from influencing an unrelated weather decision.
+- [x] Six specialist handoffs record domain query names, evidence IDs, the shared input version, start/end timestamps, duration, and consumed status.
+- [x] Causal-path API edges are persisted relationships with graph-precondition failure tests.
+- [x] Server autonomy can be disabled for a pending supervised proposal and re-enabled for guarded auto-application.
+- [x] Operations Brain routes ownership, incident, current-policy, supersession, and unsupported questions to distinct graph-backed responses.
 - [x] Policy supersession visibly advances graph state and replans with the new version; a supervised run also shows pending-plan invalidation.
 
 ## Demo assets
 
-- [x] Final 2:43 video is recorded from the release candidate.
-- [x] Audio is intelligible at normal volume.
-- [x] The first 30 seconds show the problem, product, and provenance boundary.
-- [x] The recording includes one model/fallback badge with truthful narration.
-- [x] Track 1 causal path and policy-authorized applied graph action are visible.
-- [x] Track 2 handoffs, later memory retrieval, and stale-proposal invalidation are visible.
-- [x] Track 3 source/owner/version evidence and a policy mutation are visible.
+- [ ] Re-record the final video from the hardened release candidate; the earlier 2:43 recording predates the final graph-proof changes.
+- [ ] Audio is intelligible at normal volume.
+- [ ] The first 30 seconds show the problem, product, and provenance boundary.
+- [ ] The recording includes one model/fallback badge with truthful narration.
+- [ ] Track 1 shows the full safe ranking, event-class cost-window shortlist, matching model allowlist, distinct candidate tradeoffs, persisted causal relationships, and policy-authorized application.
+- [ ] Track 2 shows six uniquely identified timestamped Cypher handoffs, contextual recall, and the applied episode's same six specialist chains plus full decision lineage after reset.
+- [ ] Track 3 shows question-routed Operations Brain answers, source/owner/version evidence, and policy mutation.
+- [ ] The server-side autonomy toggle is visibly demonstrated in both supervised and guarded-auto modes.
 - [ ] Video link works in a signed-out browser.
 - [x] Screenshot/thumbnail uses the final interface.
 

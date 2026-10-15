@@ -26,7 +26,7 @@ def supervised_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     engine.close()
 
 
-def test_continuous_cycles_coordinate_six_agents_and_memory_changes_a_later_plan(
+def test_continuous_cycles_coordinate_six_graph_agents_and_keep_memory_contextual(
     auto_engine: GroundGraphEngine,
 ):
     initial = auto_engine.snapshot()
@@ -49,22 +49,22 @@ def test_continuous_cycles_coordinate_six_agents_and_memory_changes_a_later_plan
     assert at_bag_event["clock"]["cycle"] == 8
     assert at_bag_event["current_plan"]["status"] == "APPLIED"
     assert at_bag_event["memory"]["episode_count"] == 2
-    assert at_bag_event["current_plan"]["memory_influence"]["applied"] is True
-    assert at_bag_event["current_plan"]["memory_influence"]["changed_selection"] is True
+    assert at_bag_event["current_plan"]["memory_influence"]["applied"] is False
+    assert at_bag_event["current_plan"]["memory_influence"]["context_event_class"] == "TURNAROUND"
+    assert at_bag_event["current_plan"]["strategy"] == "TURNAROUND_RECOVERY"
     assert at_bag_event["current_plan"]["safety_validation"]["passed"] is True
     checks = {
         item["id"]: item["passed"]
         for item in at_bag_event["current_plan"]["safety_validation"]["checks"]
     }
     assert checks["CURRENT_KNOWLEDGE"] is True
-    assert len(at_bag_event["handoffs"]) == 12
+    assert len(at_bag_event["handoffs"]) == 8 * 6
     edge_types = {item["type"] for item in at_bag_event["causal_path"]["edges"]}
-    assert {"ROTATES_TO", "USES_RESOURCE", "AUTHORIZED_BY"}.issubset(edge_types)
+    assert {"ROTATES_TO", "REORDERS", "AUTHORIZED_BY", "DELAYS"}.issubset(edge_types)
 
     evidence = at_bag_event["current_plan"]["policy_authorization"]["evidence"]
     assert {item["action_type"] for item in evidence} == {
-        "RESEQUENCE_DEPARTURE",
-        "REASSIGN_GATE",
+        "RESEQUENCE_TASKS",
         "PROTECT_ROTATION",
     }
     assert all(item["procedure_id"] and item["source_excerpt"] for item in evidence)
@@ -77,6 +77,22 @@ def test_continuous_cycles_coordinate_six_agents_and_memory_changes_a_later_plan
     handoff_count = auto_engine.backend.query("MATCH (h:Handoff) RETURN count(h)").result_set[0][0]
     finding_count = auto_engine.backend.query("MATCH (f:Finding) RETURN count(f)").result_set[0][0]
     assert int(handoff_count) == int(finding_count) == 8 * 6
+    latest_handoffs = [item for item in at_bag_event["handoffs"] if item["cycle"] == 8]
+    assert len(latest_handoffs) == 6
+    assert len({item["query_name"] for item in latest_handoffs}) == 6
+    assert {item["state_version"] for item in latest_handoffs} == {
+        at_bag_event["current_plan"]["based_on_version"]
+    }
+    assert max(item["started_at"] for item in latest_handoffs) <= min(
+        item["ended_at"] for item in latest_handoffs
+    )
+    assert {item["status"] for item in latest_handoffs} == {"CONSUMED"}
+    assert {item["name"] for item in at_bag_event["tool_trace"]} >= {
+        "inspect_disruption",
+        "get_current_policy",
+        "recall_episode",
+        "validate_candidate",
+    }
 
 
 def test_null_flight_events_activate_and_no_change_cycles_are_audited(
@@ -166,8 +182,12 @@ def test_stale_plan_is_rejected_and_policy_mutation_changes_authorization(
         "PROC-GATE-1.3",
         replacement={"id": "PROC-GATE-2.0", "version": "2.0", "action_types": []},
     )
-    assert changed["current_plan"] is None
-    assert changed["replanning"]["history"][0]["status"] == "ESCALATED"
+    assert changed["current_plan"] is not None
+    assert all(
+        action["type"] != "REASSIGN_GATE"
+        for action in changed["current_plan"]["actions"]
+    )
+    assert changed["replanning"]["history"][0]["status"] == "PLAN_PROPOSED"
     relation_count = supervised_engine.backend.query(
         "MATCH (:Airport {id: 'ORD'})-[:GOVERNED_BY]->"
         "(:Policy {id: 'PROC-GATE-2.0'}) RETURN count(*)"
@@ -198,8 +218,12 @@ def test_policy_freshness_is_checked_during_planning_and_again_before_apply(
             "freshness_status": "STALE_FOR_REPLAY",
         },
     )
-    assert changed["current_plan"] is None
-    assert changed["replanning"]["history"][0]["status"] == "ESCALATED"
+    assert changed["current_plan"] is not None
+    assert all(
+        action["type"] != plan["actions"][0]["type"]
+        for action in changed["current_plan"]["actions"]
+    )
+    assert changed["replanning"]["history"][0]["status"] == "PLAN_PROPOSED"
 
 
 def test_apply_and_mcp_recompute_live_freeze_guard(
@@ -248,8 +272,11 @@ def test_local_model_is_allowlisted_and_uses_configured_timeout(
         {
             "id": "CAND-SAFE",
             "strategy": "FLOW_BALANCE",
-            "score": 7,
+            "cost_score": 7,
             "projected_delay": 2,
+            "recovered_minutes": 5,
+            "burden_minutes": 2,
+            "actions": [],
         }
     ]
     handoffs = [{"from_agent": "AGENT-FLOW", "summary": "Capacity checked."}]
@@ -282,7 +309,8 @@ def test_local_model_is_allowlisted_and_uses_configured_timeout(
     )
     assert candidate_id == "CAND-SAFE"
     assert source == "local_model"
-    assert summary == "Selected safe plan."
+    assert "cost 7" in summary
+    assert "5 projected recovery minutes" in summary
     assert observed["timeout"] == 27
 
     FakeResponse.read = staticmethod(
@@ -303,37 +331,39 @@ def test_local_model_is_allowlisted_and_uses_configured_timeout(
     assert source == "deterministic_fallback"
 
 
-def test_memory_ranking_and_local_model_final_choice_have_distinct_attribution(
+def test_memory_ranking_and_context_guard_preserve_model_attribution(
     auto_engine: GroundGraphEngine,
     monkeypatch: pytest.MonkeyPatch,
 ):
     first = auto_engine.tick(to_minute=5)
     assert first["memory"]["episode_count"] == 1
+    auto_engine.reset()
 
-    def choose_non_leader(candidates, _handoffs):
-        assert len(candidates) > 1
+    def choose_context_candidate(candidates, _handoffs):
+        assert [item["strategy"] for item in candidates] == ["FLOW_BALANCE"]
         return (
-            candidates[-1]["id"],
+            candidates[0]["id"],
             "local_model",
-            "Local model chose a different allowlisted recovery tradeoff.",
+            "Local model confirmed the context-bounded recovery candidate.",
         )
 
     auto_engine.enable_llm = True
-    monkeypatch.setattr(auto_engine, "_local_model_choice", choose_non_leader)
-    snapshot = auto_engine.tick(to_minute=36)
+    monkeypatch.setattr(auto_engine, "_local_model_choice", choose_context_candidate)
+    snapshot = auto_engine.tick(to_minute=5)
     plan = snapshot["current_plan"]
     influence = plan["memory_influence"]
 
     assert plan["selected_by"] == "local_model"
     assert influence["applied_to_ranking"] is True
-    assert influence["ranking_changed"] is True
-    assert influence["memory_adjusted_ranking_winner_id"] != plan["candidate_id"]
+    assert influence["ranking_changed"] is False
+    assert influence["memory_adjusted_ranking_winner_id"] == plan["candidate_id"]
+    assert influence["model_eligible_candidate_ids"] == [plan["candidate_id"]]
     assert influence["selected_candidate_id"] == plan["candidate_id"]
     assert influence["final_candidate_id"] == plan["candidate_id"]
     assert influence["final_choice_source"] == "local_model"
-    assert influence["final_choice_matched_adjusted_ranking"] is False
+    assert influence["final_choice_matched_adjusted_ranking"] is True
     assert "deterministic ranking" in influence["ranking_summary"]
-    assert "local model made the final allowlisted choice" in influence["summary"].lower()
+    assert "local model confirmed" in influence["summary"].lower()
     assert plan["selection_attribution"] == {
         "final_candidate_id": plan["candidate_id"],
         "selected_by": "local_model",
@@ -341,13 +371,33 @@ def test_memory_ranking_and_local_model_final_choice_have_distinct_attribution(
         "memory_adjusted_ranking_winner_id": influence[
             "memory_adjusted_ranking_winner_id"
         ],
-        "memory_changed_ranking": True,
+        "memory_changed_ranking": False,
     }
     recalled = auto_engine.backend.query(
-        "MATCH (d:DecisionEpisode {cycle: 8})-[:RECALLED]->(m:Memory) "
+        "MATCH (d:DecisionEpisode {cycle: 1})-[:RECALLED]->(m:Memory) "
         "RETURN count(m)"
     ).result_set[0][0]
     assert int(recalled) == 1
+
+
+def test_latest_turnaround_event_keeps_manual_replay_context_stable(
+    supervised_engine: GroundGraphEngine,
+):
+    snapshot = supervised_engine.tick(to_minute=36)
+    plan = snapshot["current_plan"]
+
+    assert plan["status"] == "PROPOSED"
+    assert plan["episode_id"].startswith("EPISODE-8-")
+    assert plan["memory_influence"]["context_event_class"] == "TURNAROUND"
+    assert plan["strategy"] == "TURNAROUND_RECOVERY"
+    assert plan["model_candidate_set"] == [
+        {
+            "id": plan["candidate_id"],
+            "strategy": "TURNAROUND_RECOVERY",
+            "cost_score": plan["cost_score"],
+            "context_penalty": 0,
+        }
+    ]
 
 
 def test_reset_keeps_graph_memory_and_mcp_tools_are_bounded(
@@ -355,9 +405,19 @@ def test_reset_keeps_graph_memory_and_mcp_tools_are_bounded(
 ):
     applied = auto_engine.tick(to_minute=5)
     assert applied["memory"]["episode_count"] == 1
+    lineage_query = (
+        "MATCH (:DecisionEpisode)-[:SELECTED]->(:Plan)-[:RESULTED_IN]->"
+        "(:Outcome)<-[:REMEMBERS]-(:Memory) RETURN count(*)"
+    )
+    assert int(auto_engine.backend.query(lineage_query).result_set[0][0]) == 1
     reset = auto_engine.reset()
     assert reset["clock"]["label"] == "08:00"
+    assert reset["clock"]["playing"] is False
+    assert reset["clock"]["can_play"] is True
     assert reset["memory"]["episode_count"] == 1
+    assert int(auto_engine.backend.query(lineage_query).result_set[0][0]) == 1
+    assert reset["current_plan"]["historical"] is True
+    assert reset["current_plan"]["causal_path"]["edges"]
 
     mcp = GroundGraphMCP(auto_engine)
     listed = mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -367,6 +427,7 @@ def test_reset_keeps_graph_memory_and_mcp_tools_are_bounded(
         "recall_episode",
         "get_current_policy",
         "validate_candidate",
+        "get_coordinator_trace",
     }
     recalled = mcp.call_tool("recall_episode", {"limit": 3})
     assert recalled["episodes"][0]["strategy"]
@@ -392,3 +453,120 @@ def test_flask_api_returns_one_self_contained_snapshot(
     company = client.post("/api/company-brain", json={"question": "What is current?"})
     assert company.status_code == 200
     assert company.get_json()["citations"]
+
+
+def test_causal_path_contains_only_real_edges_and_refreshes_after_deletion(
+    supervised_engine: GroundGraphEngine,
+):
+    snapshot = supervised_engine.tick(to_minute=5)
+    path = snapshot["causal_path"]
+    assert 10 <= len(path["nodes"]) <= 20
+    for edge in path["edges"]:
+        rows = supervised_engine.backend.query(
+            f"MATCH (a {{id: $source}})-[r:{edge['type']}]->(b {{id: $target}}) "
+            "RETURN count(r)",
+            {"source": edge["source"], "target": edge["target"]},
+        ).result_set
+        assert int(rows[0][0]) == 1
+
+    recovered = next(edge for edge in path["edges"] if edge["type"] == "RECOVERED_BY")
+    supervised_engine.backend.query(
+        "MATCH (a {id: $source})-[r:RECOVERED_BY]->(b {id: $target}) DELETE r",
+        {"source": recovered["source"], "target": recovered["target"]},
+    )
+    refreshed = supervised_engine.snapshot()["causal_path"]["edges"]
+    assert recovered not in refreshed
+
+
+def test_missing_graph_precondition_blocks_apply(
+    supervised_engine: GroundGraphEngine,
+):
+    snapshot = supervised_engine.tick(to_minute=5)
+    plan = snapshot["current_plan"]
+    flow = next(
+        action for action in plan["actions"] if action["type"] == "RESEQUENCE_DEPARTURE"
+    )
+    supervised_engine.backend.query(
+        "MATCH (f:Flight {id: $flight})-[r:USES]->(runway:Runway {id: $runway}) DELETE r",
+        {"flight": flow["affected_flight_id"], "runway": flow["target_id"]},
+    )
+    validation = supervised_engine.validate_candidate(
+        plan["candidate_id"], snapshot["state_version"]
+    )
+    checks = {item["id"]: item for item in validation["checks"]}
+    assert validation["passed"] is False
+    assert checks["TARGETS_EXIST"]["passed"] is False
+    assert any(
+        item["passed"] is False
+        for item in checks["TARGETS_EXIST"]["graph_preconditions"]
+    )
+    with pytest.raises(RuntimeError, match="TARGETS_EXIST"):
+        supervised_engine.apply(plan["id"], snapshot["state_version"])
+
+
+def test_server_autonomy_toggle_controls_execution_and_is_idempotent(
+    supervised_engine: GroundGraphEngine,
+):
+    client = create_app(supervised_engine).test_client()
+    disabled = client.post("/api/autonomy", json={"enabled": False})
+    assert disabled.status_code == 200
+    client.post("/api/reset", json={"preserve_memory": False})
+    proposed = client.post("/api/replan/tick", json={"to_minute": 5}).get_json()
+    assert proposed["replanning"]["auto_apply"] is False
+    assert proposed["current_plan"]["status"] == "PROPOSED"
+    assert proposed["metrics"]["plans_applied"] == 0
+    assert proposed["memory"]["episode_count"] == 0
+
+    enabled = client.post("/api/autonomy", json={"enabled": True})
+    assert enabled.status_code == 200
+    applied = enabled.get_json()
+    assert applied["current_plan"]["status"] == "APPLIED"
+    assert applied["metrics"]["plans_applied"] == 1
+    assert applied["memory"]["episode_count"] == 1
+
+    repeated = client.post("/api/autonomy", json={"enabled": True}).get_json()
+    assert repeated["metrics"]["plans_applied"] == 1
+    assert repeated["memory"]["episode_count"] == 1
+
+
+def test_company_brain_routes_questions_to_distinct_graph_evidence(
+    auto_engine: GroundGraphEngine,
+):
+    ownership = auto_engine.company_brain("Who owns gate reassignment?")
+    incident = auto_engine.company_brain("What incident is open?")
+    history = auto_engine.company_brain("Which policy was superseded?")
+    unsupported = auto_engine.company_brain("How many pilots are on duty?")
+    unsupported_owner = auto_engine.company_brain("Who owns deicing at Terminal 5?")
+
+    assert ownership["answer_type"] == "OWNERSHIP_AND_AUTHORITY"
+    assert "Gate Control Lead" in ownership["answer"]
+    assert incident["answer_type"] == "INCIDENT_STATUS"
+    assert "INC-2024-0112-OPS-07" in incident["answer"]
+    assert incident["citations"]
+    assert incident["citations"][0]["event_id"] == "EVT-BAG-0836"
+    assert history["answer_type"] == "POLICY_HISTORY"
+    assert "supersedes" in history["answer"]
+    assert "vNone" not in history["answer"]
+    assert len({ownership["answer"], incident["answer"], history["answer"]}) == 3
+    assert unsupported["answer_type"] == "INSUFFICIENT_EVIDENCE"
+    assert unsupported["insufficient_evidence"] is True
+    assert unsupported["citations"] == []
+    assert unsupported_owner["answer_type"] == "INSUFFICIENT_EVIDENCE"
+    assert unsupported_owner["insufficient_evidence"] is True
+    assert unsupported_owner["citations"] == []
+
+
+def test_record_level_provenance_separates_observed_and_modeled_fields(
+    auto_engine: GroundGraphEngine,
+):
+    snapshot = auto_engine.snapshot()
+    records = snapshot["provenance"]["records"]
+    flight = next(item for item in records if item["entity_id"] == "UA1414-IN")
+    gate = next(item for item in records if item["entity_id"] == "C16")
+    assert flight["relationship"] == "SOURCED_FROM"
+    assert flight["source_record_id"] == "2024-01-12:UA:1414:SYR:ORD"
+    assert "scheduled_minute" in flight["observed_fields"]
+    assert "gate" in flight["modeled_fields"]
+    assert gate["relationship"] == "MODELED_BY"
+    assert gate["observed_fields"] == []
+    assert gate["source_id"] == "MODEL-GROUNDGRAPH-V1"

@@ -24,11 +24,9 @@ const ui = {
   tickTimer: null,
   frame: null,
   lastFrameAt: 0,
-  autoApplyTimer: null,
-  autoApplyCycle: null,
-  resumeAfterApply: false,
   scrubbing: false,
   policyDemo: null,
+  brainBusy: false,
 };
 
 const UNAVAILABLE_SNAPSHOT = {
@@ -46,7 +44,7 @@ const UNAVAILABLE_SNAPSHOT = {
   memory: { episode_count: 0, recalled: [], influence: {} },
   policies: { authorization_complete: false, applicable: [] },
   metrics: { active_delay_minutes: 0, modeled_effect_delay_minutes: 0, projected_delay_minutes: 0, recovered_minutes: 0, plans_proposed: 0, plans_applied: 0 },
-  replanning: { status: "ENGINE_UNAVAILABLE", automatic: false, interval_minutes: 5, cycle: 0, history: [] },
+  replanning: { status: "ENGINE_UNAVAILABLE", automatic: false, auto_apply: false, interval_minutes: 5, cycle: 0, history: [] },
   graph: { name: "groundgraph", runtime_mode: "unavailable", node_count: 0, edge_count: 0 },
 };
 function formatClock(relative, snapshot = ui.snapshot) {
@@ -75,7 +73,7 @@ function coordinatorDisplayName() {
 }
 function selectionAttribution(value) {
   const key = String(value || "").toLowerCase();
-  if (key === "local_model") return { label: "LOCAL QWEN SELECTED", tone: "local-model", detail: "The configured local Qwen model chose from server-validated safe candidates." };
+  if (key === "local_model") return { label: "LOCAL QWEN SELECTED", tone: "local-model", detail: "The configured local Qwen model chose from the server-validated, context-bounded safe shortlist." };
   if (key === "deterministic_fallback") return { label: "DETERMINISTIC FALLBACK", tone: "deterministic", detail: "The local model did not return a valid choice, so the safe deterministic ranking selected the candidate." };
   if (key === "deterministic_safe_planner") return { label: "DETERMINISTIC SAFE PLANNER", tone: "deterministic", detail: "The local model was disabled, so the safe deterministic ranking selected the candidate." };
   return { label: key ? `SELECTOR · ${shortStatus(key).toUpperCase()}` : "SELECTOR NOT REPORTED", tone: "neutral", detail: "Selection attribution returned by the GroundGraph API." };
@@ -114,7 +112,11 @@ async function request(path, options = {}) {
   try {
     const response = await fetch(path, { ...options, signal: controller.signal, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || payload.detail || `Request failed (${response.status})`);
+    if (!response.ok) {
+      const error = new Error(payload.error || payload.detail || `Request failed (${response.status})`);
+      error.status = response.status; error.payload = payload;
+      throw error;
+    }
     return payload;
   } finally { clearTimeout(timer); }
 }
@@ -136,7 +138,7 @@ function normalizeSnapshot(raw) {
     memory: { episode_count: 0, recalled: [], influence: {}, ...obj(value.memory) },
     policies: { authorization_complete: false, applicable: [], ...obj(value.policies) },
     metrics: { modeled_effect_delay_minutes: 0, projected_delay_minutes: 0, recovered_minutes: 0, plans_proposed: 0, plans_applied: 0, ...obj(value.metrics) },
-    replanning: { status: "MONITORING", automatic: true, interval_minutes: 5, cycle: number(clock.cycle, 0), history: [], ...obj(value.replanning) },
+    replanning: { status: "MONITORING", automatic: true, auto_apply: false, interval_minutes: 5, cycle: number(clock.cycle, 0), history: [], ...obj(value.replanning) },
     graph: obj(value.graph),
   };
   snapshot.duration = Math.max(1, end - start);
@@ -147,6 +149,25 @@ function activeEvent(snapshot = ui.snapshot) {
   const minute = number(snapshot?.clock?.minute);
   return [...list(snapshot?.events)].filter((event) => number(event.at_minute) <= minute).sort((a, b) => number(b.at_minute) - number(a.at_minute))[0]
     || list(snapshot?.events).sort((a, b) => number(a.at_minute) - number(b.at_minute))[0] || null;
+}
+
+function displayedIncidentEvent(snapshot = ui.snapshot) {
+  const timelineEvent = activeEvent(snapshot);
+  const plan = snapshot?.current_plan;
+  const historical = Boolean(plan?.display_only || plan?.historical || plan?.is_current === false);
+  if (historical) return timelineEvent;
+  const planEvent = list(snapshot?.current_plan?.causal_path?.nodes).find((node) => String(node?.type || "").toUpperCase() === "EVENT");
+  if (!planEvent) return timelineEvent;
+  const current = list(snapshot?.events).find((event) => String(event.id) === String(planEvent.id));
+  if (current && number(current.at_minute) <= number(snapshot?.clock?.minute)) return { ...planEvent, ...current };
+  return timelineEvent;
+}
+
+function formatRuntimeTime(value) {
+  if (!value) return "not reported";
+  const date = new Date(value); if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
+  return `${parts}.${String(date.getMilliseconds()).padStart(3, "0")}`;
 }
 
 function renderRuntime() {
@@ -189,7 +210,9 @@ function renderWeather() {
 }
 
 function renderIncident() {
-  const snapshot = ui.snapshot; const event = activeEvent(snapshot); if (!event) return;
+  const snapshot = ui.snapshot; const event = displayedIncidentEvent(snapshot); if (!event) return;
+  const mitigated = ["MITIGATED", "RESOLVED", "CLOSED"].includes(String(event.status || "").toUpperCase());
+  $("incident-kicker").textContent = mitigated ? "LATEST EVENT · MITIGATED" : "ACTIVE DISRUPTION";
   const tag = $("incident-provenance"); const source = provenance(event.source_kind); tag.className = `provenance-tag ${source.tone}`; tag.textContent = source.label; tag.title = source.description;
   const titleByType = {
     BAG_RECONCILIATION_DELAY: "Baggage reconciliation delay entering the graph",
@@ -203,23 +226,31 @@ function renderIncident() {
   $("event-time").textContent = formatClock(event.at_minute);
   $("event-title").textContent = $("incident-title").textContent;
   $("event-detail").textContent = event.summary || "The event is visible to the agent swarm.";
-  $("event-symbol").textContent = String(event.severity).toUpperCase() === "HIGH" ? "!" : "↗";
-  const callout = $("event-callout"); callout.classList.toggle("risk", ["HIGH", "MEDIUM"].includes(String(event.severity).toUpperCase()) && !["MITIGATED", "RESOLVED"].includes(String(event.status).toUpperCase()));
-  callout.classList.toggle("success", ["MITIGATED", "RESOLVED"].includes(String(event.status).toUpperCase()));
+  $("event-symbol").textContent = mitigated ? "✓" : String(event.severity).toUpperCase() === "HIGH" ? "!" : "↗";
+  const severity = document.querySelector(".severity-symbol"); if (severity) severity.textContent = mitigated ? "✓" : "!";
+  const callout = $("event-callout"); callout.classList.toggle("risk", ["HIGH", "MEDIUM"].includes(String(event.severity).toUpperCase()) && !mitigated);
+  callout.classList.toggle("success", mitigated);
 }
 
 function renderMetrics() {
-  const metrics = ui.snapshot.metrics; const plan = ui.snapshot.current_plan;
+  const metrics = ui.snapshot.metrics;
+  const displayedPlan = ui.snapshot.current_plan;
+  const historical = Boolean(displayedPlan?.display_only || displayedPlan?.historical || displayedPlan?.is_current === false);
+  const plan = historical ? null : displayedPlan;
   const applied = ["APPLIED", "EXECUTING", "COMPLETED"].includes(String(plan?.status || "").toUpperCase());
-  const historical = Boolean(plan?.display_only || plan?.historical || plan?.is_current === false);
   const activeBaseline = number(first(metrics.active_delay_minutes, metrics.modeled_effect_delay_minutes), 0);
   const appliedBaseline = plan?.baseline_delay !== undefined && plan?.baseline_delay !== null
     ? number(plan.baseline_delay, activeBaseline)
     : number(plan?.projected_delay, 0) + number(plan?.recovered_minutes, 0);
   const before = applied ? appliedBaseline : activeBaseline;
   const after = plan ? number(first(plan.projected_delay, metrics.projected_delay_minutes), before) : null;
-  const affected = Math.max(0, ui.snapshot.flights.filter((flight) => flight.at_risk || number(flight.delay_minutes) > 0).length);
-  const projectedAffected = plan ? Math.max(0, affected - Math.min(affected, Math.max(1, list(plan.actions).length - 1))) : null;
+  const currentlyAffected = Math.max(0, ui.snapshot.flights.filter((flight) => flight.at_risk || number(flight.delay_minutes) > 0 || ["DELAYED", "AT_RISK", "CONFLICT"].includes(String(flight.status || "").toUpperCase())).length);
+  const pathFlights = new Set(list(plan?.causal_path?.nodes)
+    .filter((node) => String(node?.type || "").toUpperCase().includes("FLIGHT"))
+    .map((node) => node.id)
+    .filter(Boolean));
+  const affected = plan && before > 0 ? Math.max(currentlyAffected, pathFlights.size) : currentlyAffected;
+  const projectedAffected = plan ? (after <= 0 ? 0 : currentlyAffected) : null;
   const gateBefore = before ? Math.max(4, Math.round(before * 0.65)) : 0; const gateAfter = after === null ? null : Math.max(0, Math.round(after * 0.45));
   $("delay-before").textContent = before ? `${before}m` : "—"; $("delay-after").textContent = after === null ? "—" : `${after}m`;
   $("delay-delta").textContent = after === null ? "awaiting a material disruption" : `${Math.max(0, before - after)} min projected recovery`;
@@ -231,15 +262,20 @@ function renderMetrics() {
   const currentVersion = applied || number(plan?.based_on_version) === ui.snapshot.state_version;
   const checkLabel = safety.checks.length ? `${safety.passedCount} / ${safety.checks.length}` : safety.safe ? "VERIFIED" : "BLOCKED";
   $("checks-value").textContent = plan ? (authorization && currentVersion && safety.validationPassed ? checkLabel : "BLOCKED") : "WAITING";
-  $("checks-detail").textContent = plan ? (historical ? "validated at apply time" : !safety.knowledgeCurrent ? "policy knowledge is stale" : authorization && safety.validationPassed ? "policy + current graph verified" : "current authority incomplete") : "validated before every apply";
-  const max = Math.max(before, 1); const projected = after === null ? 0 : after;
-  $("bar-delay-value").textContent = after === null ? "waiting" : `${before} → ${projected} min`;
-  $("bar-gate-value").textContent = gateAfter === null ? "waiting" : `${gateBefore} → ${gateAfter} min`;
-  document.querySelector("#comparison-bars > div:first-child .projected").style.width = after === null ? "0%" : `${Math.max(5, projected / max * 100)}%`;
-  document.querySelector("#comparison-bars > div:nth-child(2) .projected").style.width = gateAfter === null ? "0%" : `${Math.max(5, gateAfter / Math.max(gateBefore, 1) * 100)}%`;
-  const recovered = Math.max(0, number(first(plan?.recovered_minutes, metrics.recovered_minutes), 0));
-  $("outcome-improvement").textContent = recovered ? `−${recovered} MIN PROJECTED` : "AWAITING PLAN";
-  $("outcome-title").textContent = recovered ? `${recovered} minutes recovered in the bounded replay` : "Counterfactual opens after a safe plan";
+  $("checks-detail").textContent = plan ? (!safety.knowledgeCurrent ? "policy knowledge is stale" : authorization && safety.validationPassed ? "policy + current graph verified" : "current authority incomplete") : historical ? "previous decision retained in memory" : "validated before every apply";
+  const outcomePlan = displayedPlan;
+  const outcomeBefore = outcomePlan ? number(first(outcomePlan.baseline_delay, metrics.baseline_delay_minutes), 0) : 0;
+  const outcomeAfter = outcomePlan ? number(first(outcomePlan.projected_delay, metrics.projected_delay_minutes), outcomeBefore) : null;
+  const outcomeGateBefore = outcomeBefore ? Math.max(4, Math.round(outcomeBefore * 0.65)) : 0;
+  const outcomeGateAfter = outcomeAfter === null ? null : Math.max(0, Math.round(outcomeAfter * 0.45));
+  const outcomeMax = Math.max(outcomeBefore, 1);
+  $("bar-delay-value").textContent = outcomeAfter === null ? "waiting" : `${outcomeBefore} → ${outcomeAfter} min`;
+  $("bar-gate-value").textContent = outcomeGateAfter === null ? "waiting" : `${outcomeGateBefore} → ${outcomeGateAfter} min`;
+  document.querySelector("#comparison-bars > div:first-child .projected").style.width = outcomeAfter === null ? "0%" : `${Math.max(5, outcomeAfter / outcomeMax * 100)}%`;
+  document.querySelector("#comparison-bars > div:nth-child(2) .projected").style.width = outcomeGateAfter === null ? "0%" : `${Math.max(5, outcomeGateAfter / Math.max(outcomeGateBefore, 1) * 100)}%`;
+  const recovered = Math.max(0, number(outcomePlan?.recovered_minutes, 0));
+  $("outcome-improvement").textContent = recovered ? historical ? `PREVIOUS RUN · −${recovered} MIN` : `−${recovered} MIN PROJECTED` : "AWAITING PLAN";
+  $("outcome-title").textContent = recovered ? historical ? `Last applied replay projected ${recovered} minutes recovered` : `${recovered} minutes recovered in the bounded replay` : "Counterfactual opens after a safe plan";
 }
 
 const AGENT_KEYS = { "AGENT-WEATHER": "weather", "AGENT-FLOW": "flow", "AGENT-GATE": "gate", "AGENT-TURN": "turn", "AGENT-POLICY": "policy", "AGENT-MEMORY": "memory", "AGENT-COORD": "coordinator" };
@@ -269,6 +305,15 @@ function renderAgents() {
 }
 function agentLabel(id) { return String(id || "Agent").replace("AGENT-", "").replace("COORD", coordinatorDisplayName()).replaceAll("_", " "); }
 
+const SPECIALIST_ORDER = ["WEATHER", "FLOW", "GATE", "TURN", "POLICY", "MEMORY"];
+function specialistKey(handoff) { return String(handoff?.from_agent || "").replace("AGENT-", "").toUpperCase(); }
+function handoffCard(handoff) {
+  const key = specialistKey(handoff); const evidence = list(handoff.evidence_ids); const inputVersion = first(handoff.input_state_version, handoff.based_on_version, handoff.state_version, "—");
+  const started = first(handoff.started_at, handoff.created_at); const ended = first(handoff.ended_at, handoff.completed_at, handoff.created_at);
+  const query = first(handoff.query_name, handoff.query, `${key.toLowerCase()} graph read`);
+  return `<article class="handoff-card" data-agent="${escapeHtml(key)}"><span class="handoff-agent">${escapeHtml(key.slice(0, 1) || "A")}</span><span class="handoff-body"><strong>${escapeHtml(agentLabel(handoff.from_agent))} → Coordinator</strong><small>${escapeHtml(humanize(query))}</small><span class="handoff-meta"><span>input v${escapeHtml(inputVersion)}</span><span>${escapeHtml(formatRuntimeTime(started))} → ${escapeHtml(formatRuntimeTime(ended))}</span></span><span class="handoff-evidence">${evidence.length ? evidence.map((id) => `<span>${escapeHtml(id)}</span>`).join("") : '<span class="empty">no evidence IDs returned</span>'}</span></span><em class="handoff-status">${escapeHtml(shortStatus(first(handoff.status, "RECORDED")).toUpperCase())}</em></article>`;
+}
+
 function renderReplanning() {
   const snapshot = ui.snapshot; const replanning = snapshot.replanning; const cycle = number(first(replanning.cycle, snapshot.clock.cycle)); const history = list(replanning.history);
   $("cycle-number").textContent = String(cycle).padStart(2, "0"); $("cycle-count").textContent = history.length;
@@ -276,10 +321,26 @@ function renderReplanning() {
   $("replan-state").textContent = ui.busy ? "Specialists are reading FalkorDB" : shortStatus(replanning.status || "MONITORING");
   const next = number(replanning.next_checkpoint_minute, snapshot.clock.minute + number(replanning.interval_minutes, 5)); const remaining = Math.max(0, next - snapshot.clock.minute);
   $("replan-next").textContent = ui.busy ? `Cycle ${cycle + 1} in progress` : `Next scan in ${remaining} replay min · 10-min churn guard`;
-  $("cycles-stage").innerHTML = history.length ? history.map((item, index) => {
+  const autoApply = replanning.auto_apply === true; const toggle = $("auto-apply"); toggle.checked = autoApply;
+  $("auto-apply-state").textContent = `${autoApply ? "server on" : "waiting for approval"} · ${number(replanning.execution_freeze_minutes, 10)}-min churn guard`;
+  const orderedHistory = [...history];
+  const handoffCycles = snapshot.handoffs.map((handoff) => number(handoff.cycle)).filter((value) => value > 0);
+  const latestCycle = first(orderedHistory[0]?.cycle, handoffCycles.length ? Math.max(...handoffCycles) : null);
+  const historyKey = (item) => first(item?.episode_id, item?.id, item?.plan_id, item?.cycle);
+  const latestSelection = first(historyKey(orderedHistory[0]), latestCycle);
+  const validSelection = orderedHistory.some((item) => String(historyKey(item)) === String(ui.selectedCycle)) || (!orderedHistory.length && handoffCycles.some((item) => String(item) === String(ui.selectedCycle)));
+  if (ui.selectedCycle === null || !validSelection) ui.selectedCycle = latestSelection;
+  const selected = orderedHistory.find((item) => String(historyKey(item)) === String(ui.selectedCycle)) || orderedHistory[0] || null;
+  const selectedCycle = first(selected?.cycle, latestCycle);
+  const selectedEpisode = first(selected?.episode_id, selected?.id);
+  const selectedHandoffs = snapshot.handoffs.filter((handoff) => selectedEpisode && handoff.episode_id ? String(handoff.episode_id) === String(selectedEpisode) : String(handoff.cycle) === String(selectedCycle)).sort((a, b) => SPECIALIST_ORDER.indexOf(specialistKey(a)) - SPECIALIST_ORDER.indexOf(specialistKey(b)));
+  const missing = SPECIALIST_ORDER.filter((key) => !selectedHandoffs.some((handoff) => specialistKey(handoff) === key));
+  const selector = orderedHistory.length ? orderedHistory.map((item) => {
     const status = String(first(item.status, item.result, "NO_CHANGE")).toUpperCase(); const tone = status.includes("APPLIED") ? "applied" : status.includes("NO_") || status.includes("MONITOR") || status.includes("FROZEN") ? "no-change" : "";
-    return `<button type="button" class="cycle-row ${tone} ${index === 0 ? "latest" : ""}" data-cycle="${escapeHtml(item.cycle)}"><i></i><span><strong>Cycle ${String(number(item.cycle)).padStart(2, "0")} · ${escapeHtml(status.replaceAll("_", " "))}</strong><small>${escapeHtml(first(item.summary, "Graph state checked; no material plan change."))}</small></span><em>${escapeHtml(String(first(item.trigger, "PERIODIC")).replaceAll("_", " "))}</em></button>`;
-  }).join("") : '<div class="empty-detail">No server-returned replanning cycles yet.</div>';
+    const selectionKey = historyKey(item);
+    return `<button type="button" class="cycle-row ${tone} ${String(selectionKey) === String(historyKey(selected)) ? "latest" : ""}" data-cycle="${escapeHtml(item.cycle)}" data-episode="${escapeHtml(selectionKey)}"><i></i><span><strong>Cycle ${String(number(item.cycle)).padStart(2, "0")} · ${escapeHtml(status.replaceAll("_", " "))}</strong><small>${escapeHtml(first(item.summary, "Graph state checked; no material plan change."))}</small></span><em>${escapeHtml(String(first(item.trigger, "PERIODIC")).replaceAll("_", " "))}</em></button>`;
+  }).join("") : "";
+  $("cycles-stage").innerHTML = selectedCycle !== null && selectedCycle !== undefined ? `<section class="cycle-browser"><div class="cycle-selector">${selector}</div><section class="cycle-inspector"><header><span><strong>Six specialist handoffs · cycle ${String(number(selectedCycle)).padStart(2, "0")}</strong><small>${escapeHtml(first(selected?.summary, "Persisted findings shared through FalkorDB before coordination."))}</small></span><em>${selectedHandoffs.length}/6 RETURNED</em></header><div class="handoff-grid">${selectedHandoffs.map(handoffCard).join("")}${missing.length ? `<div class="handoff-missing">Awaiting persisted handoff${missing.length === 1 ? "" : "s"}: ${escapeHtml(missing.map(humanize).join(", "))}</div>` : ""}</div></section></section>` : '<div class="empty-detail">No server-returned replanning cycles yet.</div>';
 }
 
 function planActions(plan) { return list(plan?.actions); }
@@ -291,6 +352,7 @@ function renderPlan() {
   const snapshot = ui.snapshot; const plan = snapshot.current_plan; const actions = planActions(plan);
   $("plan-count").textContent = actions.length; $("waiting-state").hidden = Boolean(plan); $("plan-stage").hidden = !plan;
   if (!plan) {
+    $("decision-envelope").innerHTML = "";
     $("waiting-kicker").textContent = `WATCHING ${number(snapshot.graph.node_count, snapshot.flights.length + snapshot.resources.length)} CONNECTED ENTITIES`;
     $("waiting-title").textContent = snapshot.clock.minute < 36 ? "No intervention needed yet" : "No material plan change";
     $("waiting-copy").textContent = "Five-minute and event-driven cycles may return NO_CHANGE. A plan appears only when the graph finds a safe, material improvement.";
@@ -311,7 +373,7 @@ function renderPlan() {
   const rankingNote = influence.ranking_changed
     ? `Memory shifted the deterministic ranking from ${baseLeader} to ${adjustedLeader}.`
     : influence.applied_to_ranking || influence.applied
-      ? `Memory adjusted candidate scores by ${number(influence.adjustment)} without changing the deterministic leader.`
+      ? `Context-matched memory adjusted candidate cost by ${number(influence.adjustment)} without changing the deterministic leader.`
       : "No prior outcome changed the deterministic ranking.";
   const choiceNote = String(plan.selected_by).toLowerCase() === "local_model"
     ? influence.final_choice_matched_adjusted_ranking
@@ -319,6 +381,17 @@ function renderPlan() {
       : `Local Qwen made the final allowlisted choice: ${finalChoice}.`
     : `The deterministic safe planner made the final choice: ${finalChoice}.`;
   $("plan-explanation").textContent = `${explanation} ${rankingNote} ${choiceNote}`;
+  const selectedId = String(first(plan.candidate_id, influence.final_candidate_id, ""));
+  const modelIds = new Set(list(plan.model_candidate_set).map((item) => String(item.id)));
+  const candidates = list(plan.safe_candidate_set);
+  const candidateRows = candidates.map((candidate) => {
+    const chosen = String(candidate.id) === selectedId; const considered = modelIds.has(String(candidate.id));
+    const disposition = chosen ? "SELECTED" : considered ? "MODEL SHORTLIST" : "WITHHELD BY CONTEXT WINDOW";
+    return `<span class="candidate-row ${chosen ? "chosen" : ""} ${considered ? "model-shortlist" : "context-withheld"}"><b>${escapeHtml(humanize(candidate.strategy))}</b><small>${number(candidate.recovered_minutes)}m recovery · ${number(candidate.burden_minutes)}m coordination</small><em>${number(candidate.cost_score)} cost · ${disposition}</em></span>`;
+  }).join("");
+  const tools = list(snapshot.tool_trace).filter((tool) => number(tool.cycle) === number(plan.cycle)).sort((a, b) => number(a.sequence) - number(b.sequence)).slice(0, 4);
+  const toolRows = tools.map((tool) => `<span title="${escapeHtml(first(tool.result_summary, "Graph check completed"))}">✓ ${escapeHtml(humanize(tool.name))}</span>`).join("");
+  $("decision-envelope").innerHTML = `${candidates.length ? `<section><header><b>SAFE NON-DOMINATED RANKING</b><small>${candidates.length} safe · ${modelIds.size} sent to Qwen · lower cost is better</small></header>${candidateRows}</section>` : ""}${tools.length ? `<section><header><b>COORDINATOR CHECKS</b><small>persisted tool trace</small></header><div class="tool-chips">${toolRows}</div></section>` : ""}`;
   updatePrimaryAction();
 }
 function humanize(value) { return String(value || "").replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()); }
@@ -356,6 +429,12 @@ function renderEvidenceAndMemory() {
   const evidence = policyEvidence.length ? policyEvidence : applicable;
   $("evidence-count").textContent = evidence.length;
   const policyControl = policyDemoMarkup(currentGatePolicy(snapshot));
+  const pathIds = new Set(list(snapshot.causal_path?.nodes).map((node) => String(node.id)));
+  const provenanceRecords = list(snapshot.provenance?.records).filter((record) => pathIds.has(String(record.entity_id))).slice(0, 6);
+  const provenanceRows = provenanceRecords.length ? `<section class="record-provenance"><header><small>FIELD-LEVEL PROVENANCE</small><strong>Public records and modeled boundaries</strong></header>${provenanceRecords.map((record) => {
+    const observed = list(record.observed_fields); const modeled = list(record.modeled_fields);
+    return `<details class="evidence-card ${String(record.truth_label).toUpperCase().includes("MODEL") ? "modeled" : "current"}"><summary><i></i><span><strong>${escapeHtml(record.entity_id)}</strong><small>${escapeHtml(first(record.source_label, record.source_id, "Source record"))} · ${escapeHtml(record.source_record_id)}</small></span><em>${escapeHtml(shortStatus(record.relationship))}</em></summary><div class="evidence-detail"><span><b>Observed fields</b>${escapeHtml(observed.length ? observed.join(", ") : "none")}</span><span><b>Modeled fields</b>${escapeHtml(modeled.length ? modeled.join(", ") : "none")}</span><span><b>Stable record ID</b>${escapeHtml(record.record_node_id)}</span></div></details>`;
+  }).join("")}</section>` : "";
   const evidenceRows = evidence.length ? evidence.map((item) => {
     const title = first(item.title, item.policy_id, item.id, "Current procedure");
     const owner = first(item.owner, item.owner_team, "Named owner unavailable");
@@ -371,9 +450,15 @@ function renderEvidenceAndMemory() {
     const procedure = first(item.procedure_id, item.procedure_version_id, "");
     return `<details class="evidence-card ${freshnessTone}"><summary><i></i><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml([owner, source, version].filter(Boolean).join(" · "))}</small></span><em>${escapeHtml(shortStatus(freshness))}</em></summary><div class="evidence-detail"><span><b>Responsible role</b>${escapeHtml(role)}</span><span><b>Source section</b>${escapeHtml(section)}</span>${procedure ? `<span><b>Procedure link</b>${escapeHtml(procedure)}</span>` : ""}<span class="evidence-excerpt"><b>Source excerpt</b><q>${escapeHtml(excerpt)}</q></span></div></details>`;
   }).join("") : '<div class="empty-detail">Policy and provenance evidence appears with a proposed plan.</div>';
-  $("evidence-stage").innerHTML = policyControl + evidenceRows;
+  $("evidence-stage").innerHTML = policyControl + provenanceRows + evidenceRows;
   const recalled = list(snapshot.memory.recalled); $("memory-count").textContent = number(snapshot.memory.episode_count, recalled.length);
-  $("memory-stage").innerHTML = recalled.length ? recalled.map((item) => `<article class="memory-row"><i></i><span><strong>${escapeHtml(first(item.strategy, item.title, item.id, "Prior recovery"))}</strong><small>${escapeHtml(first(item.summary, item.outcome_status ? `${item.outcome_status} · ${number(item.benefit_minutes)} min benefit` : "Stored graph episode"))}</small></span><em>${escapeHtml(first(item.outcome_status, item.status, "RECALLED"))}</em></article>`).join("") : `<div class="empty-detail">No prior outcome yet.<br />An applied plan becomes shared episodic memory for the next run.</div>`;
+  const influenceIds = new Set(list(snapshot.memory.influence?.memory_ids).map(String));
+  $("memory-stage").innerHTML = recalled.length ? recalled.map((item) => {
+    const context = obj(item.context); const flights = list(first(item.flight_ids, context.flight_ids)); const resources = list(first(item.resource_ids, context.resource_ids)); const rotations = list(first(item.rotation_ids, context.rotation_ids));
+    const matched = influenceIds.has(String(item.id));
+    const contextLine = [first(item.event_class, context.event_class, "prior disruption"), flights.length ? `flights ${flights.join(", ")}` : null, rotations.length ? `rotation ${rotations.join(", ")}` : null, resources.length ? `resources ${resources.join(", ")}` : null].filter(Boolean).join(" · ");
+    return `<details class="memory-row ${matched ? "matched" : ""}"><summary><i></i><span><strong>${escapeHtml(first(item.strategy, item.title, item.id, "Prior recovery"))}</strong><small>${escapeHtml(`${first(item.outcome_status, item.status, "SUCCESS")} · ${number(item.benefit_minutes)} projected min · ${contextLine}`)}</small></span><em>${matched ? "USED THIS CYCLE" : "STORED"}</em></summary><div class="memory-detail"><span><b>Memory</b>${escapeHtml(item.id)}</span><span><b>Plan → outcome</b>${escapeHtml(first(item.plan_id, "linked plan"))} → ${escapeHtml(first(item.outcome_id, "linked outcome"))}</span><span><b>Confidence</b>${escapeHtml(first(item.confidence, "SIMULATED"))}</span></div></details>`;
+  }).join("") : `<div class="empty-detail">No prior outcome yet.<br />An applied plan becomes shared episodic memory for the next run.</div>`;
 }
 
 function curatedPath(snapshot = ui.snapshot) {
@@ -402,9 +487,73 @@ function renderCausalPath() {
 function renderTrackProof() {
   const snapshot = ui.snapshot; const pathLength = list(snapshot.causal_path?.nodes).length || curatedPath(snapshot).length;
   $("track-one-proof").textContent = `${pathLength}-node path → ${snapshot.current_plan ? planActions(snapshot.current_plan).length : 0} bounded actions`;
-  $("track-two-proof").textContent = `${snapshot.handoffs.length} handoffs · ${number(snapshot.memory.episode_count)} memories`;
+  const latestEpisode = list(snapshot.replanning?.history)[0];
+  const latestEpisodeId = first(latestEpisode?.episode_id, latestEpisode?.id);
+  const latestHandoffCount = snapshot.handoffs.filter((handoff) => latestEpisodeId && handoff.episode_id ? String(handoff.episode_id) === String(latestEpisodeId) : String(handoff.cycle) === String(latestEpisode?.cycle)).length;
+  $("track-two-proof").textContent = `${latestHandoffCount} handoffs this cycle · ${number(snapshot.memory.episode_count)} memories`;
   const policy = list(snapshot.policies.applicable).find((item) => item.current !== false && String(item.status) !== "SUPERSEDED");
   $("track-three-proof").textContent = policy ? `${policy.id} · ${policy.owner}` : "Current policy + named owner";
+}
+
+function graphPathLabel(item) {
+  if (typeof item === "string") return item;
+  const edge = obj(item); return first(edge.label, edge.path, [edge.source, edge.type, edge.target].filter(Boolean).join(" → "), edge.id, "Graph evidence");
+}
+
+function brainCitationMarkup(citation) {
+  if (typeof citation === "string") return `<details class="brain-evidence"><summary><strong>${escapeHtml(citation)}</strong><small>CITATION</small></summary><div>Evidence returned by Operations Brain.</div></details>`;
+  const item = obj(citation); const title = first(item.title, item.policy_id, item.procedure_id, item.document_id, item.id, "Connected evidence");
+  const owner = first(item.owner, item.owner_team, item.owner_team_id); const section = first(item.source_section, item.section); const version = first(item.version, item.policy_version);
+  const excerpt = first(item.excerpt, item.source_excerpt, item.summary, "No excerpt was returned for this record.");
+  const meta = [owner ? `Owner · ${owner}` : null, section ? `Section · ${section}` : null, version ? `Version · ${version}` : null].filter(Boolean);
+  return `<details class="brain-evidence"><summary><strong>${escapeHtml(title)}</strong><small>${escapeHtml(shortStatus(first(item.freshness_status, item.status, "EVIDENCE")).toUpperCase())}</small></summary><div>${meta.length ? `<span>${escapeHtml(meta.join(" · "))}</span>` : ""}<q>${escapeHtml(excerpt)}</q></div></details>`;
+}
+
+function renderBrainAnswer(payload) {
+  const answer = first(payload.answer, "Operations Brain found connected records but did not return a written answer.");
+  const citations = list(payload.citations); const artifacts = list(payload.artifacts); const paths = list(payload.graph_path); const evidenceIds = list(payload.evidence_ids);
+  const derivedEvidence = evidenceIds.length ? evidenceIds : citations.flatMap((citation) => typeof citation === "object" ? [first(citation.policy_id, citation.procedure_id, citation.document_id, citation.id)].filter(Boolean) : []);
+  const artifactChips = artifacts.map((artifact) => typeof artifact === "string" ? artifact : first(artifact.id, artifact.title)).filter(Boolean);
+  const proof = [...derivedEvidence, ...artifactChips, ...paths.map(graphPathLabel)].filter(Boolean);
+  $("brain-answer").innerHTML = `<article class="brain-response"><header><strong>${escapeHtml(first(payload.question, "Operations Brain answer"))}</strong><em class="brain-answer-type">${escapeHtml(shortStatus(first(payload.answer_type, payload.truth_label, "GRAPH ANSWER")).toUpperCase())}</em></header><p>${escapeHtml(answer)}</p>${proof.length ? `<div class="brain-proof-row">${proof.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}${citations.length ? citations.map(brainCitationMarkup).join("") : '<details class="brain-evidence"><summary><strong>No supporting citation returned</strong><small>CHECK EVIDENCE</small></summary><div>The answer is shown as returned, without inventing a source.</div></details>'}</article>`;
+}
+
+function setBrainBusy(active, label = "reading graph") {
+  ui.brainBusy = active; const card = document.querySelector(".brain-card"); card?.classList.toggle("busy", active); if (active) card?.classList.remove("error");
+  $("brain-status").lastChild.textContent = ` ${active ? label : "ready"}`;
+  document.querySelectorAll("[data-brain-question], #brain-question, #brain-submit").forEach((control) => { control.disabled = active || !ui.backend; });
+}
+
+async function askOperationsBrain(question) {
+  const value = String(question || "").trim(); if (!value || ui.brainBusy) return;
+  $("brain-question").value = value; setBrainBusy(true);
+  $("brain-answer").innerHTML = '<span class="brain-empty"><i>…</i><span><strong>Following the connected evidence</strong><small>Checking current versions, owners, incidents, and their graph relationships.</small></span></span>';
+  let failed = false;
+  try {
+    const payload = obj(await request("/api/company-brain", { method: "POST", body: JSON.stringify({ question: value }), timeout: 12000 }));
+    if (payload.ok !== true) throw new Error(first(payload.error, "Operations Brain could not answer from the graph."));
+    renderBrainAnswer(payload);
+  } catch (error) {
+    failed = true;
+    $("brain-answer").innerHTML = `<div class="brain-error">${escapeHtml(first(error.message, "Operations Brain is unavailable."))}</div>`;
+  } finally {
+    setBrainBusy(false);
+    if (failed) { document.querySelector(".brain-card")?.classList.add("error"); $("brain-status").lastChild.textContent = " answer unavailable"; }
+  }
+}
+
+async function setAutonomy(enabled) {
+  if (!ui.backend || ui.busy) return;
+  const toggle = $("auto-apply"); toggle.disabled = true; $("auto-apply-state").textContent = "updating server…";
+  try {
+    const result = requireHealthySnapshot(await request("/api/autonomy", { method: "POST", body: JSON.stringify({ enabled: Boolean(enabled) }) }));
+    renderSnapshot(result, { keepVisualTime: true });
+    showToast(result.replanning?.auto_apply === true ? "Guarded auto-apply enabled on the server" : "Plans will wait for operator approval");
+  } catch (error) {
+    toggle.checked = ui.snapshot.replanning.auto_apply === true;
+    $("auto-apply-state").textContent = `${toggle.checked ? "server on" : "waiting for approval"} · ${number(ui.snapshot.replanning.execution_freeze_minutes, 10)}-min churn guard`;
+    showToast(first(error.message, "Could not update autonomy setting"));
+  } finally { toggle.disabled = !ui.backend; }
 }
 
 function renderTab() {
@@ -434,6 +583,7 @@ function renderUnavailablePresentation() {
   $("window-label").textContent = "Replay locked";
   $("weather-primary").textContent = "No graph snapshot available";
   $("weather-secondary").textContent = "FalkorDB connection required";
+  $("incident-kicker").textContent = "SYSTEM STATUS";
   $("incident-provenance").className = "provenance-tag"; $("incident-provenance").textContent = "SYSTEM"; $("incident-provenance").title = "Runtime availability status";
   $("incident-title").textContent = "Planning engine unavailable";
   $("incident-detail").textContent = "No operational events are being simulated in this browser.";
@@ -471,8 +621,10 @@ function syncEngineAvailability() {
   const available = ui.backend;
   document.body.classList.toggle("engine-offline", !available);
   ui.map?.setEngineAvailable?.(available);
-  ["play-button", "timeline", "jump-button", "reset-button", "auto-apply"].forEach((id) => { const control = $(id); if (control) control.disabled = !available; });
+  ["timeline", "jump-button", "reset-button", "auto-apply"].forEach((id) => { const control = $(id); if (control) control.disabled = !available || ui.busy; });
+  if ($("play-button")) $("play-button").disabled = !available;
   document.querySelectorAll("[data-speed], .publish-policy-update").forEach((control) => { control.disabled = !available || ui.busy; });
+  document.querySelectorAll("[data-brain-question], #brain-question, #brain-submit").forEach((control) => { control.disabled = !available || ui.brainBusy; });
   const panel = $("engine-unavailable");
   if (panel) {
     panel.hidden = available;
@@ -490,7 +642,6 @@ function syncEngineAvailability() {
 }
 
 function enterEngineUnavailable(error, { preserveSnapshot = false } = {}) {
-  clearTimeout(ui.autoApplyTimer); ui.autoApplyTimer = null; ui.autoApplyCycle = null;
   ui.playing = false; ui.busy = false; ui.backend = false; ui.health = {};
   ui.unavailableReason = first(error?.message, "FalkorDB is required to run GroundGraph.");
   const preserveGenuine = preserveSnapshot && ui.source === "api" && ui.snapshot?.ok === true;
@@ -506,11 +657,14 @@ function renderSnapshot(snapshot, { keepVisualTime = false } = {}) {
     ? `GroundGraph · cycle ${ui.snapshot.clock.cycle} · graph v${ui.snapshot.state_version} · FalkorDB-backed replay`
     : `GroundGraph · read-only · FalkorDB required`;
   syncEngineAvailability();
-  maybeScheduleAutoApply();
+  const current = ui.snapshot.current_plan; const status = String(current?.status || "").toUpperCase();
+  const historical = Boolean(current?.display_only || current?.historical || current?.is_current === false);
+  if (!historical && status === "PROPOSED" && ui.snapshot.replanning.auto_apply !== true) setPlaying(false);
 }
 
 function setBusy(active, label = "Specialists are reading FalkorDB") {
   ui.busy = active; $("replan-radar").classList.toggle("running", active); if (active) { $("replan-state").textContent = label; $("replan-next").textContent = "Parallel findings → coordinator → safety validator"; }
+  if (!active && ui.snapshot) renderReplanning();
   renderAgents(); updatePrimaryAction(); syncEngineAvailability();
 }
 
@@ -519,20 +673,24 @@ async function mutation(path, body) {
   if (!ui.backend) { enterEngineUnavailable(new Error("FalkorDB is required for operational actions.")); return null; }
   setBusy(true);
   try {
-    const result = requireHealthySnapshot(await request(path, { method: "POST", body: JSON.stringify(body || {}) }));
+    const result = requireHealthySnapshot(await request(path, { method: "POST", body: JSON.stringify(body || {}), timeout: 90000 }));
     renderSnapshot(result, { keepVisualTime: path.includes("tick") }); return result;
   } catch (error) {
-    enterEngineUnavailable(error, { preserveSnapshot: true });
-    showToast("Engine unavailable — replay frozen");
+    if (number(error?.status) >= 400 && number(error?.status) < 500) {
+      showToast(first(error.message, "The current graph state rejected that action"));
+    } else {
+      enterEngineUnavailable(error, { preserveSnapshot: true });
+      showToast("Engine unavailable — replay frozen");
+    }
     return null;
   } finally {
-    setBusy(false); maybeScheduleAutoApply();
+    setBusy(false);
   }
 }
 
 async function advance(minutes) {
   if (!ui.backend || !ui.playing || ui.busy || ui.snapshot.clock.minute >= ui.snapshot.scenario.end_minute) { if (ui.snapshot?.clock?.minute >= ui.snapshot?.scenario?.end_minute) setPlaying(false); return; }
-  await mutation("/api/replan/tick", { minutes: Math.max(1, Math.min(60, Math.round(minutes))) });
+  await mutation("/api/replan/tick", { minutes: Math.max(1, Math.min(30, Math.round(minutes))) });
 }
 async function runReplan(trigger = "MANUAL_UI") {
   const result = await mutation("/api/analyze", { trigger });
@@ -540,9 +698,8 @@ async function runReplan(trigger = "MANUAL_UI") {
 }
 async function applyPlan() {
   const plan = ui.snapshot.current_plan; if (!plan || String(plan.status).toUpperCase() !== "PROPOSED") return;
-  clearTimeout(ui.autoApplyTimer); ui.autoApplyTimer = null;
   const result = await mutation("/api/apply", { plan_id: plan.id, state_version: ui.snapshot.state_version });
-  if (result) { ui.map?.setPlanApplied(true); showToast("Validated recovery applied to the replay"); if (ui.resumeAfterApply) setPlaying(true); }
+  if (result) { ui.map?.setPlanApplied(true); showToast("Validated recovery applied to the replay"); }
 }
 
 async function publishPolicyUpdate(policyId) {
@@ -581,23 +738,10 @@ async function publishPolicyUpdate(policyId) {
   finally { setBusy(false); if (wasPlaying && ui.backend) setPlaying(true); }
 }
 async function resetReplay() {
-  clearTimeout(ui.autoApplyTimer); ui.autoApplyTimer = null; ui.policyDemo = null; setPlaying(false); setBusy(true, "Resetting replay state");
+  ui.policyDemo = null; ui.selectedCycle = null; setPlaying(false); setBusy(true, "Resetting replay state");
   if (!ui.backend) { setBusy(false); enterEngineUnavailable(new Error("FalkorDB is required to reset the replay.")); return; }
-  try { const snapshot = requireHealthySnapshot(await request("/api/reset", { method: "POST", body: "{}" })); renderSnapshot(snapshot); showToast("Replay restarted"); setTimeout(() => { if (ui.backend) setPlaying(true); }, 350); }
+  try { const snapshot = requireHealthySnapshot(await request("/api/reset", { method: "POST", body: "{}" })); renderSnapshot(snapshot); setPlaying(false); showToast("Replay restarted and paused at 08:00"); }
   catch (error) { enterEngineUnavailable(error, { preserveSnapshot: true }); showToast("Engine unavailable — replay frozen"); } finally { setBusy(false); }
-}
-
-function maybeScheduleAutoApply() {
-  const plan = ui.snapshot.current_plan; const status = String(plan?.status || "").toUpperCase();
-  if (!ui.backend || !$("auto-apply").checked || !plan || status !== "PROPOSED" || ui.autoApplyCycle === ui.snapshot.clock.cycle || ui.busy) return;
-  const safety = planSafety(plan); const automation = obj(plan.automation);
-  const automationAuthorized = automation.auto_apply_authorized !== false && automation.authorized !== false;
-  const automationKnowledgeCurrent = automation.knowledge_current !== false && !String(automation.freshness_status || "").toUpperCase().includes("STALE");
-  if (!safety.safe || !automationAuthorized || !automationKnowledgeCurrent || plan.requires_human_approval === true || number(plan.based_on_version) !== ui.snapshot.state_version) return;
-  ui.autoApplyCycle = ui.snapshot.clock.cycle; ui.resumeAfterApply = ui.playing; setPlaying(false);
-  $("safety-agent-message").textContent = "Revalidating · 10-min freeze"; document.querySelector('[data-agent="safety"]').classList.add("active");
-  showToast("Safe plan found — validator is checking current graph state");
-  ui.autoApplyTimer = setTimeout(applyPlan, 2600);
 }
 
 function setPlaying(active) {
@@ -643,25 +787,27 @@ function bindInteractions() {
     const plan = ui.snapshot.current_plan; const status = String(plan?.status || "").toUpperCase();
     if (plan && status === "PROPOSED") applyPlan(); else if (plan && status === "APPLIED") { ui.selectedTab = "cycles"; renderTab(); } else runReplan();
   });
-  $("auto-apply").addEventListener("change", () => { if (!$("auto-apply").checked) { clearTimeout(ui.autoApplyTimer); ui.autoApplyTimer = null; showToast("Plans will wait for your approval"); } else { showToast("Guarded auto-apply enabled"); maybeScheduleAutoApply(); } });
+  $("auto-apply").addEventListener("change", (event) => setAutonomy(event.target.checked));
   document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => { ui.selectedTab = button.dataset.tab; renderTab(); }));
   $("causal-path").addEventListener("click", (event) => { const node = event.target.closest(".causal-node"); if (!node) return; document.querySelectorAll(".causal-node").forEach((item) => item.classList.toggle("active", item === node)); $("causal-caption").textContent = node.dataset.detail; ui.map?.setSelectedFlight(node.dataset.node); });
-  $("cycles-stage").addEventListener("click", (event) => { const row = event.target.closest(".cycle-row"); if (!row) return; document.querySelectorAll(".cycle-row").forEach((item) => item.classList.toggle("latest", item === row)); const item = list(ui.snapshot.replanning.history).find((entry) => String(entry.cycle) === row.dataset.cycle); if (item) $("causal-caption").textContent = `Cycle ${item.cycle} · ${shortStatus(item.status)} · ${item.summary}`; });
+  $("cycles-stage").addEventListener("click", (event) => { const row = event.target.closest(".cycle-row"); if (!row) return; ui.selectedCycle = first(row.dataset.episode, row.dataset.cycle); renderReplanning(); const item = list(ui.snapshot.replanning.history).find((entry) => String(first(entry.episode_id, entry.id, entry.plan_id, entry.cycle)) === String(ui.selectedCycle)); if (item) $("causal-caption").textContent = `Cycle ${item.cycle} · ${shortStatus(item.status)} · ${item.summary}`; });
   $("evidence-stage").addEventListener("click", (event) => {
     const publish = event.target.closest(".publish-policy-update");
     if (publish) { publishPolicyUpdate(publish.dataset.policyId); return; }
     if (event.target.closest(".view-policy-cycle")) { ui.selectedTab = "cycles"; renderTab(); }
   });
   $("action-list").addEventListener("click", (event) => { const row = event.target.closest(".action-item"); if (row?.dataset.flight) { ui.map?.setSelectedFlight(row.dataset.flight); showToast("Highlighted the action target and its graph path"); } });
+  document.querySelectorAll("[data-brain-question]").forEach((button) => button.addEventListener("click", () => askOperationsBrain(button.dataset.brainQuestion)));
+  $("brain-form").addEventListener("submit", (event) => { event.preventDefault(); askOperationsBrain($("brain-question").value); });
 }
 
 async function boot() {
-  bindInteractions(); ui.map = window.GroundGraphAirport.create("#airport-canvas", { onCounts: (counts) => { $("airborne-count").textContent = counts.airborne; $("taxi-count").textContent = counts.taxiing; $("risk-count").textContent = counts.risk; $("protected-count").textContent = counts.protected; } });
+  bindInteractions(); ui.map = window.GroundGraphAirport.create("#airport-canvas", { onCounts: (counts) => { $("airborne-count").textContent = counts.airborne; $("taxi-count").textContent = counts.taxiing; $("gate-count").textContent = counts.atGate; $("risk-count").textContent = counts.risk; $("protected-count").textContent = counts.protected; } });
   ui.source = "connecting"; renderSnapshot(UNAVAILABLE_SNAPSHOT);
   try {
     const [snapshotResult, healthResult] = await Promise.all([request("/api/snapshot", { timeout: 3500 }), request("/api/health", { timeout: 3500 })]);
     const snapshot = requireHealthySnapshot(snapshotResult); ui.health = requireHealthyRuntime(healthResult); ui.backend = true; ui.source = "api"; ui.unavailableReason = "";
-    renderSnapshot(snapshot); setPlaying(true); syncEngineAvailability();
+    renderSnapshot(snapshot); setPlaying(false); syncEngineAvailability();
   } catch (error) { enterEngineUnavailable(error); }
   ui.tickTimer = setInterval(() => advance(ui.speed), 1000); ui.frame = requestAnimationFrame(animationFrame);
 }

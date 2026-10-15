@@ -13,6 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_PATHS = (
     "README.md",
     ".env.example",
+    "Makefile",
+    "requirements.txt",
+    "requirements-lite.txt",
+    "requirements-dev.txt",
+    "scripts/start_falkordb.sh",
+    "scripts/verify_stack.py",
+    "scripts/demo_check.py",
     "data/scenario.json",
     "data/provenance.json",
     "knowledge/manifest.json",
@@ -117,6 +124,10 @@ def main() -> int:
     for expected in expected_defaults:
         if expected not in env_text:
             errors.append(f"missing judged-runtime default: {expected}")
+
+    judged_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    if "FalkorDBLite" in judged_requirements or "pytest" in judged_requirements:
+        errors.append("judged requirements include optional Lite/test dependencies")
 
     submission_text = "\n".join(
         path.read_text(encoding="utf-8")

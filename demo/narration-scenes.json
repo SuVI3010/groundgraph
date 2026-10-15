@@ -1,0 +1,37 @@
+[
+  {
+    "id": "overview",
+    "title": "GroundGraph and the evidence boundary",
+    "narration": "Meet GroundGraph, a graph-native recovery command center for airport operations. This bounded replay uses the full local FalkorDB server and a local Qwen model. Selected schedule, weather, and runway fields come from public records. Gates, disruptions, policies, and every recovery effect are clearly labeled as modeled. The top-down airport view is a research sandbox, not a live air traffic control system."
+  },
+  {
+    "id": "coordination",
+    "title": "One disruption, six graph specialists",
+    "narration": "At eight thirty-six, a modeled baggage-reconciliation delay adds twelve minutes to the stored turnaround task graph for the U A fourteen fourteen to U A twenty-six seventy-two rotation. Six specialists now execute separate Cypher reads against one FalkorDB state version. Weather, runway flow, compatible gates, turnaround dependencies, current policy, and contextual memory each hand a versioned finding to the coordinator before it may choose a plan. The Cycles view exposes those query names, evidence identifiers, timestamps, and consumed handoffs."
+  },
+  {
+    "id": "decision",
+    "title": "Bounded local-model selection with graph proof",
+    "narration": "GroundGraph builds three materially different strategies from connected state: flow balance, a compatible gate swap, and turnaround-task recovery. Projected recovery and operational burden come from the graph, and cost score is lower-is-better. The server computes the full safe non-dominated ranking, then forms a context-bounded model shortlist: within four cost points of the leader for a turnaround event class, or eight for other event classes. Only those shortlist identifiers enter the Model Run allowlist, and local Qwen selects one of them. The visible causal path is then queried from relationships already stored in FalkorDB. Evidence cards expose stable source-record identifiers and the observed and modeled fields behind each entity."
+  },
+  {
+    "id": "application",
+    "title": "Fresh validation and bounded autonomy",
+    "narration": "Qwen proposes; it does not execute. Before application, the server rechecks graph version, required relationships, current policy and company knowledge, source freshness, minimum benefit, the execution freeze, and the churn guard. The autonomy switch changes the server setting. Turning it on revalidates the pending proposal, applies the modeled recovery once, and writes an Outcome. Turning it off again leaves later proposals available for inspection."
+  },
+  {
+    "id": "memory",
+    "title": "Persistent, context-matched episodic memory",
+    "narration": "Application also preserves the complete Decision Episode to Plan to Outcome and Memory lineage, together with the same six unique Agent Run to Finding to Handoff chains consumed by that episode. The memory records event class, flights, rotation, resources, policies, and a disruption signature. Restarting the replay reseeds operations while restoring that applied lineage and all six specialist chains in FalkorDB. On the next matching baggage cycle, the coordinator states exactly whether memory adjusted the lower-is-better cost or changed the selected strategy. An unrelated weather cycle cannot reuse this baggage memory."
+  },
+  {
+    "id": "knowledge",
+    "title": "Operations Brain and live policy supersession",
+    "narration": "For the third track, Operations Brain routes plain-language questions to different bounded traversals. Ownership questions return the current policy, owner, responsible role, source excerpt, and graph path. Incident questions follow a separate set of connected records. Publishing the synthetic replacement gate policy creates a SUPERSEDES relationship, advances graph state, invalidates stale proposals, and triggers replanning without an application-code change. The new cycle consumes the replacement version while the old version remains queryable as history."
+  },
+  {
+    "id": "continuous",
+    "title": "Continuous replanning with restraint",
+    "narration": "At nine oh four, the next time-gated public weather observation enters the graph and triggers another coordinated check. Continuous replanning does not mean constant intervention: the system records the cycle and declines unnecessary churn when no material recovery is available. Across all three tracks, FalkorDB determines what the agents can see, how they coordinate and remember, and which current company knowledge authorizes an action. Every improvement shown here is projected under the replay assumptions, never claimed as measured real-world savings."
+  }
+]

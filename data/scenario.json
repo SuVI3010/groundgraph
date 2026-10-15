@@ -23,6 +23,9 @@
         "role": "ARRIVAL",
         "capacity_per_hour": 24,
         "status": "LIMITED",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KORD:10C/28C",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MIXED",
         "observed_fields": [
           "id",
@@ -42,6 +45,9 @@
         "role": "DEPARTURE",
         "capacity_per_hour": 30,
         "status": "OPEN",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KORD:10L/28R",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MIXED",
         "observed_fields": [
           "id",
@@ -61,6 +67,9 @@
         "role": "MIXED",
         "capacity_per_hour": 18,
         "status": "STANDBY",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KORD:09R/27L",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MIXED",
         "observed_fields": [
           "id",
@@ -82,6 +91,7 @@
         "compatible_classes": [
           "NARROWBODY"
         ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MODELED",
         "observed_fields": [],
         "modeled_fields": [
@@ -98,6 +108,7 @@
         "compatible_classes": [
           "NARROWBODY"
         ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MODELED",
         "observed_fields": [],
         "modeled_fields": [
@@ -114,6 +125,7 @@
         "compatible_classes": [
           "NARROWBODY"
         ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MODELED",
         "observed_fields": [],
         "modeled_fields": [
@@ -130,6 +142,7 @@
         "compatible_classes": [
           "NARROWBODY"
         ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
         "source_kind": "MODELED",
         "observed_fields": [],
         "modeled_fields": [
@@ -155,6 +168,9 @@
       "rotation_id": "ROT-UA373-UA2445",
       "turn_minutes": 45,
       "bag_risk": "LOW",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:UA:373:BTV:ORD",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
       "source_kind": "MIXED",
       "observed_fields": [
         "callsign",
@@ -186,6 +202,9 @@
       "rotation_id": "ROT-UA373-UA2445",
       "turn_minutes": 45,
       "bag_risk": "LOW",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:UA:2445:ORD:SAN",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
       "source_kind": "MIXED",
       "observed_fields": [
         "callsign",
@@ -217,6 +236,9 @@
       "rotation_id": "ROT-UA1888-UA1071",
       "turn_minutes": 45,
       "bag_risk": "MEDIUM",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:UA:1888:ATL:ORD",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
       "source_kind": "MIXED",
       "observed_fields": [
         "callsign",
@@ -248,6 +270,9 @@
       "rotation_id": "ROT-UA1888-UA1071",
       "turn_minutes": 45,
       "bag_risk": "LOW",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:UA:1071:ORD:DFW",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
       "source_kind": "MIXED",
       "observed_fields": [
         "callsign",
@@ -279,6 +304,9 @@
       "rotation_id": "ROT-UA1414-UA2672",
       "turn_minutes": 45,
       "bag_risk": "HIGH",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:UA:1414:SYR:ORD",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
       "source_kind": "MIXED",
       "observed_fields": [
         "callsign",
@@ -310,6 +338,9 @@
       "rotation_id": "ROT-UA1414-UA2672",
       "turn_minutes": 45,
       "bag_risk": "HIGH",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:UA:2672:ORD:AUS",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
       "source_kind": "MIXED",
       "observed_fields": [
         "callsign",
@@ -329,6 +360,57 @@
       ]
     }
   ],
+  "turnarounds": [
+    {
+      "id": "TURN-ROT-UA373-UA2445",
+      "rotation_id": "ROT-UA373-UA2445",
+      "inbound_flight_id": "UA373-IN",
+      "outbound_flight_id": "UA2445-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "TURN-ROT-UA1888-UA1071",
+      "rotation_id": "ROT-UA1888-UA1071",
+      "inbound_flight_id": "UA1888-IN",
+      "outbound_flight_id": "UA1071-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "TURN-ROT-UA1414-UA2672",
+      "rotation_id": "ROT-UA1414-UA2672",
+      "inbound_flight_id": "UA1414-IN",
+      "outbound_flight_id": "UA2672-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    }
+  ],
+  "turnaround_task_template": [
+    {
+      "key": "DEPLANE",
+      "label": "Deplane and unload",
+      "duration_minutes": 8
+    },
+    {
+      "key": "CABIN_SERVICE",
+      "label": "Cabin service",
+      "duration_minutes": 12
+    },
+    {
+      "key": "BAG_RECONCILIATION",
+      "label": "Baggage reconciliation",
+      "duration_minutes": 25
+    },
+    {
+      "key": "BOARD_CLOSE",
+      "label": "Board and close",
+      "duration_minutes": 12
+    }
+  ],
   "events": [
     {
       "id": "EVT-WX-0800",
@@ -341,7 +423,8 @@
       "capacity_delta": -8,
       "summary": "KORD reports 3/4 mile visibility, snow and mist; arrival capacity is constrained in the replay model.",
       "source_kind": "MIXED",
-      "source_id": "NOAA-KORD-2024-01-12T08:00",
+      "source_id": "NOAA-KORD-2024",
+      "source_record_id": "KORD:2024-01-12T08:00:00-06:00",
       "effect_source_kind": "MODELED",
       "observed_fields": [
         "at_minute",
@@ -366,7 +449,8 @@
       "delay_minutes": 12,
       "summary": "A modeled baggage scan mismatch extends the UA1414 to UA2672 turnaround from 45 to 57 minutes.",
       "source_kind": "MODELED",
-      "source_id": "MODEL-GROUND-OPS-V1",
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_record_id": "MODELED:BAG_SCAN_MISMATCH:0836",
       "effect_source_kind": "MODELED",
       "observed_fields": [],
       "modeled_fields": [
@@ -392,7 +476,8 @@
       "capacity_delta": 6,
       "summary": "The 09:04 KORD SPECI reports visibility improving to 2 miles, triggering an event-driven replan.",
       "source_kind": "MIXED",
-      "source_id": "NOAA-KORD-2024-01-12T09:04",
+      "source_id": "NOAA-KORD-2024",
+      "source_record_id": "KORD:2024-01-12T09:04:00-06:00",
       "effect_source_kind": "MODELED",
       "observed_fields": [
         "at_minute",
@@ -418,7 +503,8 @@
       "capacity_delta": -4,
       "summary": "A modeled ten-minute runway occupancy inspection temporarily reduces departure throughput.",
       "source_kind": "MODELED",
-      "source_id": "MODEL-RUNWAY-EVENT-V1",
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_record_id": "MODELED:RUNWAY_OCCUPANCY_CHECK:0912",
       "effect_source_kind": "MODELED",
       "observed_fields": [],
       "modeled_fields": [

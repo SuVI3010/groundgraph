@@ -1,0 +1,2 @@
+-r requirements.txt
+FalkorDBLite==0.10.0

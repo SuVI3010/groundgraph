@@ -94,7 +94,9 @@
 
     setSnapshot(snapshot) {
       this.snapshot = snapshot || null;
-      this.planApplied = ["APPLIED", "EXECUTING", "COMPLETED"].includes(String(snapshot?.current_plan?.status || "").toUpperCase());
+      const plan = snapshot?.current_plan;
+      const historical = Boolean(plan?.display_only || plan?.historical || plan?.is_current === false);
+      this.planApplied = !historical && ["APPLIED", "EXECUTING", "COMPLETED"].includes(String(plan?.status || "").toUpperCase());
     }
 
     setTime(minute) { this.time = Number.isFinite(Number(minute)) ? Number(minute) : 0; }
@@ -126,13 +128,22 @@
 
     aircraftStates() {
       const flights = Array.isArray(this.snapshot?.flights) ? this.snapshot.flights : [];
-      return flights.map((flight, index) => {
-        const kind = String(flight.kind || flight.direction || flight.operation || "departure").toLowerCase().includes("arr") ? "arrival" : "departure";
+      const currentPlan = this.planApplied ? this.snapshot?.current_plan : null;
+      const planTargets = new Set((currentPlan?.actions || []).map((action) => action?.target_id).filter(Boolean));
+      const planFlightPath = new Set((currentPlan?.causal_path?.nodes || [])
+        .filter((node) => String(node?.type || "").toUpperCase().includes("FLIGHT"))
+        .map((node) => node?.id)
+        .filter(Boolean));
+      const states = flights.map((flight, index) => {
+        const operation = String(flight.kind || flight.direction || flight.operation || "departure").toLowerCase();
+        const kind = operation.includes("arr") || operation.includes("inbound") || operation === "in" ? "arrival" : "departure";
         const minute = Number(flight.minute ?? flight.scheduled_minute ?? flight.event_minute ?? 0);
         const gate = gateFor(flight, index);
         const runway = RUNWAYS[index % RUNWAYS.length];
         const risk = Boolean(flight.at_risk || flight.risk || ["DELAYED", "AT_RISK", "CONFLICT"].includes(String(flight.status || "").toUpperCase()));
-        const protectedFlight = Boolean(flight.protected || this.planApplied && (flight.plan_target || risk));
+        const protectedFlight = Boolean(flight.protected || this.planApplied && (
+          flight.plan_target || risk || planTargets.has(flight.id) || planFlightPath.has(flight.id)
+        ));
         const label = flight.label || flight.callsign || flight.flight_number || flight.id || `FLIGHT ${index + 1}`;
         const state = { ...flight, id: flight.id || label, label, kind, minute, gate, runway, risk, protected: protectedFlight };
         if (kind === "arrival") {
@@ -160,6 +171,19 @@
         }
         return state;
       }).filter(Boolean);
+
+      // An inbound and its following outbound describe one physical aircraft.
+      // During the short overlap at the gate, keep the outbound label so the
+      // surface view never draws the same airframe twice.
+      const byRotation = new Map();
+      states.forEach((state) => {
+        const key = state.rotation_id || state.id;
+        const current = byRotation.get(key);
+        if (!current || (current.phase === "gate" && state.phase === "gate" && state.kind === "departure")) {
+          byRotation.set(key, state);
+        }
+      });
+      return [...byRotation.values()];
     }
 
     draw(timestamp) {
@@ -177,6 +201,7 @@
       const counts = {
         airborne: aircraft.filter((item) => ["airborne", "landing", "takeoff"].includes(item.phase)).length,
         taxiing: aircraft.filter((item) => item.phase === "taxi").length,
+        atGate: aircraft.filter((item) => item.phase === "gate").length,
         risk: aircraft.filter((item) => item.risk && !item.protected).length,
         protected: aircraft.filter((item) => item.protected).length,
       };
@@ -184,7 +209,7 @@
       if (signature !== this.countSignature) {
         this.countSignature = signature; this.onCounts(counts);
         this.canvas.setAttribute("aria-label", operational
-          ? `Stylized O'Hare operations replay. ${counts.airborne} airborne, ${counts.taxiing} taxiing, ${counts.risk} at risk and ${counts.protected} protected by the current replay plan.`
+          ? `Stylized O'Hare operations replay. ${counts.airborne} airborne, ${counts.taxiing} taxiing, ${counts.atGate} at a gate, ${counts.risk} at risk and ${counts.protected} protected by the current replay plan.`
           : this.snapshot?.ok === true ? "Airport replay paused on the last genuine server snapshot." : "Airport replay paused. FalkorDB-backed engine state is required to animate operations.");
       }
     }

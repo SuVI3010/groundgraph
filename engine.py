@@ -36,6 +36,7 @@ COORDINATOR = ("AGENT-COORD", "Recovery coordinator", "Safe plan selection")
 ACTION_TYPES = (
     "RESEQUENCE_DEPARTURE",
     "REASSIGN_GATE",
+    "RESEQUENCE_TASKS",
     "PROTECT_ROTATION",
 )
 
@@ -97,8 +98,21 @@ def _normalize_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if influence.get("applied")
             else "No applicable prior outcome changed the deterministic ranking."
         )
+    model_allowlist = {
+        str(item.get("id"))
+        for item in _list_value(payload.get("model_candidate_set"))
+        if isinstance(item, Mapping) and item.get("id")
+    }
+    if not model_allowlist:
+        model_allowlist = {
+            str(item.get("id"))
+            for item in _list_value(payload.get("safe_candidate_set"))
+            if isinstance(item, Mapping) and item.get("id")
+        }
     choice_summary = (
-        f"The local model made the final allowlisted choice: {final_candidate}."
+        f"The local model confirmed the context-bounded ranking leader: {final_candidate}."
+        if final_source == "local_model" and final_candidate == adjusted_winner
+        else f"The local model made the final allowlisted tradeoff choice: {final_candidate}."
         if final_source == "local_model"
         else f"The deterministic safe planner made the final choice: {final_candidate}."
         if final_candidate
@@ -125,7 +139,9 @@ def _normalize_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
     payload["selection_attribution"] = {
         "final_candidate_id": final_candidate,
         "selected_by": final_source,
-        "candidate_was_allowlisted": bool(final_candidate),
+        "candidate_was_allowlisted": bool(
+            final_candidate and str(final_candidate) in model_allowlist
+        ),
         "memory_adjusted_ranking_winner_id": adjusted_winner,
         "memory_changed_ranking": ranking_changed,
     }
@@ -423,6 +439,7 @@ class GroundGraphEngine:
                 "status": "MONITORING",
                 "dataset_hash": self.dataset_hash,
                 "automatic_replanning": True,
+                "auto_apply": self.auto_apply,
                 "planning_interval_minutes": self.planning_interval,
                 "execution_freeze_minutes": self.execution_freeze,
                 "minimum_benefit_minutes": self.minimum_benefit,
@@ -474,6 +491,78 @@ class GroundGraphEngine:
             for first, second in zip(ordered, ordered[1:]):
                 self._create_edge(str(first["id"]), "ROTATES_TO", str(second["id"]))
 
+        gates = [dict(item) for item in self.data.get("resources", {}).get("gates", [])]
+        for flight in flights:
+            if str(flight.get("kind", "")).upper() != "OUTBOUND":
+                continue
+            aircraft_class = str(flight.get("aircraft_class", "NARROWBODY"))
+            for gate in gates:
+                compatible = gate.get("compatible_classes", [])
+                if aircraft_class in compatible:
+                    self._create_edge(
+                        str(flight["id"]),
+                        "COMPATIBLE_WITH",
+                        str(gate["id"]),
+                        {"source_kind": "MODELED"},
+                    )
+
+        task_template = [
+            dict(item) for item in self.data.get("turnaround_task_template", [])
+        ]
+        turnarounds = [dict(item) for item in self.data.get("turnarounds", [])]
+        turn_by_rotation: dict[str, dict[str, Any]] = {}
+        task_ids_by_turn: dict[str, dict[str, str]] = {}
+        for turn in turnarounds:
+            turn.setdefault("status", "PLANNED")
+            turn.setdefault(
+                "current_critical_path_minutes",
+                int(turn.get("baseline_critical_path_minutes", 45)),
+            )
+            turn.setdefault("source_kind", "MODELED")
+            turn_by_rotation[str(turn["rotation_id"])] = turn
+            self._create_node("Turnaround", turn)
+            self._create_edge(
+                str(turn["rotation_id"]), "HAS_TURNAROUND", str(turn["id"])
+            )
+            self._create_edge(
+                str(turn["inbound_flight_id"]), "FEEDS", str(turn["id"])
+            )
+            self._create_edge(
+                str(turn["id"]), "PREPARES", str(turn["outbound_flight_id"])
+            )
+            task_ids: dict[str, str] = {}
+            for task in task_template:
+                task_id = f"TASK-{turn['rotation_id']}-{task['key']}"
+                task_ids[str(task["key"])] = task_id
+                self._create_node(
+                    "TurnaroundTask",
+                    {
+                        **task,
+                        "id": task_id,
+                        "turnaround_id": turn["id"],
+                        "rotation_id": turn["rotation_id"],
+                        "baseline_duration_minutes": int(task.get("duration_minutes", 0)),
+                        "status": "PENDING",
+                        "source_kind": "MODELED",
+                        "source_id": turn.get(
+                            "source_id", "MODEL-GROUNDGRAPH-V1"
+                        ),
+                    },
+                )
+                self._create_edge(str(turn["id"]), "HAS_TASK", task_id)
+            task_ids_by_turn[str(turn["id"])] = task_ids
+            dependencies = (
+                ("DEPLANE", "CABIN_SERVICE"),
+                ("DEPLANE", "BAG_RECONCILIATION"),
+                ("CABIN_SERVICE", "BOARD_CLOSE"),
+                ("BAG_RECONCILIATION", "BOARD_CLOSE"),
+            )
+            for before, after in dependencies:
+                if before in task_ids and after in task_ids:
+                    self._create_edge(
+                        task_ids[before], "MUST_COMPLETE_BEFORE", task_ids[after]
+                    )
+
         for event in self.data.get("events", []):
             item = dict(event)
             item["at_minute"] = int(item.get("at_minute", item.get("minute", initial)))
@@ -488,11 +577,33 @@ class GroundGraphEngine:
                 self._create_edge(str(item["id"]), "AFFECTS", str(item["flight_id"]))
             if item.get("resource_id"):
                 self._create_edge(str(item["id"]), "CONSTRAINS", str(item["resource_id"]))
+            if item.get("type") == "BAG_RECONCILIATION_DELAY" and item.get(
+                "flight_id"
+            ):
+                flight = next(
+                    (
+                        candidate
+                        for candidate in flights
+                        if candidate["id"] == item["flight_id"]
+                    ),
+                    None,
+                )
+                turn = turn_by_rotation.get(str(flight.get("rotation_id"))) if flight else None
+                task_id = (
+                    task_ids_by_turn.get(str(turn["id"]), {}).get(
+                        "BAG_RECONCILIATION"
+                    )
+                    if turn
+                    else None
+                )
+                if task_id:
+                    self._create_edge(str(item["id"]), "DELAYS", task_id)
 
         procedure_by_action = self._seed_knowledge_pack()
         action_aliases = {
             "RESEQUENCE_DEPARTURE": "ASSIGN_CAPACITY_SLOT",
             "REASSIGN_GATE": "ASSIGN_GATE",
+            "RESEQUENCE_TASKS": "ACCELERATE_TURNAROUND",
             "PROTECT_ROTATION": "PROTECT_ROTATION",
             "APPLY_VALIDATED_PLAN": "APPLY_RECOVERY_PLAN",
         }
@@ -538,6 +649,56 @@ class GroundGraphEngine:
             item = dict(source)
             self._create_node("Source", item)
             self._create_edge(self.scenario_id, "USES_SOURCE", str(item["id"]))
+
+        sourced_records = [
+            *[dict(item) for item in self.data.get("flights", [])],
+            *[
+                dict(item)
+                for items in self.data.get("resources", {}).values()
+                for item in items
+            ],
+            *[dict(item) for item in self.data.get("events", [])],
+            *[dict(item) for item in self.data.get("turnarounds", [])],
+        ]
+        for item in sourced_records:
+            node_id = item.get("id")
+            source_id = item.get("source_id")
+            modeled_source_id = item.get("modeled_source_id")
+            if node_id and source_id:
+                relationship = (
+                    "MODELED_BY"
+                    if item.get("source_kind") == "MODELED"
+                    else "SOURCED_FROM"
+                )
+                self._create_edge(str(node_id), relationship, str(source_id))
+                source_record_id = str(
+                    item.get("source_record_id")
+                    or f"{source_id}:{node_id}"
+                )
+                record_node_id = (
+                    "SOURCE-RECORD-"
+                    + hashlib.sha256(
+                        f"{source_id}|{source_record_id}".encode("utf-8")
+                    ).hexdigest()[:18]
+                )
+                self._create_node(
+                    "SourceRecord",
+                    {
+                        "id": record_node_id,
+                        "source_id": source_id,
+                        "source_record_id": source_record_id,
+                        "entity_id": node_id,
+                        "truth_label": item.get("source_kind", "MODELED"),
+                        "observed_fields": item.get("observed_fields", []),
+                        "modeled_fields": item.get("modeled_fields", []),
+                    },
+                )
+                self._create_edge(record_node_id, "FROM_SOURCE", str(source_id))
+                self._create_edge(str(node_id), relationship, record_node_id)
+            if node_id and modeled_source_id and modeled_source_id != source_id:
+                self._create_edge(
+                    str(node_id), "MODELED_BY", str(modeled_source_id)
+                )
 
         for agent_id, name, role in (*SPECIALISTS, COORDINATOR):
             self._create_node(
@@ -620,8 +781,29 @@ class GroundGraphEngine:
                 procedures_by_action[str(item["action_type"])] = item
         for incident in manifest.get("incidents", []):
             incident_id = str(incident["id"])
+            self.backend.query(
+                "MATCH (i:Incident {id: $id}) SET i.event_id = $event, "
+                "i.affected_flight_id = $flight, i.downstream_flight_id = $downstream, "
+                "i.owner_team_id = $team, i.responsible_role_id = $role, "
+                "i.opened_at = $opened",
+                {
+                    "id": incident_id,
+                    "event": incident.get("event_id"),
+                    "flight": incident.get("affected_flight_id"),
+                    "downstream": incident.get("downstream_flight_id"),
+                    "team": incident.get("owner_team_id"),
+                    "role": incident.get("responsible_role_id"),
+                    "opened": incident.get("opened_at"),
+                },
+            )
             if incident.get("event_id"):
                 self._create_edge(incident_id, "REFERENCES", str(incident["event_id"]))
+            if incident.get("responsible_role_id"):
+                self._create_edge(
+                    incident_id,
+                    "RESPONSIBLE_ROLE",
+                    str(incident["responsible_role_id"]),
+                )
             if incident.get("affected_flight_id"):
                 # The compact scenario uses a direction suffix; link to the exact
                 # node only when the manifest identity is present.
@@ -670,6 +852,7 @@ class GroundGraphEngine:
             "MATCH (f:Flight) RETURN f.id, f.callsign, f.kind, f.scheduled_minute, "
             "f.estimated_minute, f.delay_minutes, f.gate, f.runway, f.rotation_id, "
             "f.status, f.source_kind, f.observed_fields, f.modeled_fields "
+            ", f.source_id, f.source_record_id, f.modeled_source_id "
             "ORDER BY f.scheduled_minute, f.id"
         ).result_set
         return [
@@ -681,6 +864,8 @@ class GroundGraphEngine:
                 "rotation_id": row[8], "status": row[9], "source_kind": row[10],
                 "observed_fields": _list_value(row[11]),
                 "modeled_fields": _list_value(row[12]),
+                "source_id": row[13], "source_record_id": row[14],
+                "modeled_source_id": row[15],
             }
             for row in rows
         ]
@@ -690,7 +875,8 @@ class GroundGraphEngine:
             "MATCH (e:OperationalEvent) RETURN e.id, e.at_minute, e.type, e.severity, "
             "e.flight_id, e.resource_id, e.delay_minutes, e.summary, e.source_kind, "
             "e.effect_source_kind, e.status, e.processed, e.observed_fields, "
-            "e.modeled_fields ORDER BY e.at_minute, e.id"
+            "e.modeled_fields, e.capacity_delta, e.source_id, e.source_record_id "
+            "ORDER BY e.at_minute, e.id"
         ).result_set
         return [
             {
@@ -701,6 +887,8 @@ class GroundGraphEngine:
                 "status": row[10], "processed": bool(row[11]),
                 "observed_fields": _list_value(row[12]),
                 "modeled_fields": _list_value(row[13]),
+                "capacity_delta": int(row[14] or 0),
+                "source_id": row[15], "source_record_id": row[16],
             }
             for row in rows
         ]
@@ -709,7 +897,8 @@ class GroundGraphEngine:
         rows = self.backend.query(
             "MATCH (r) WHERE r:Runway OR r:Gate RETURN r.id, labels(r), r.label, "
             "r.status, r.terminal, r.capacity_per_hour, r.role, r.source_kind, "
-            "r.observed_fields, r.modeled_fields ORDER BY r.id"
+            "r.observed_fields, r.modeled_fields, r.source_id, "
+            "r.source_record_id, r.modeled_source_id ORDER BY r.id"
         ).result_set
         return [
             {
@@ -720,6 +909,29 @@ class GroundGraphEngine:
                 "source_kind": row[7],
                 "observed_fields": _list_value(row[8]),
                 "modeled_fields": _list_value(row[9]),
+                "source_id": row[10], "source_record_id": row[11],
+                "modeled_source_id": row[12],
+            }
+            for row in rows
+        ]
+
+    def _provenance_records(self, limit: int = 40) -> list[dict[str, Any]]:
+        rows = self.backend.query(
+            "MATCH (entity)-[link]->(record:SourceRecord)-[:FROM_SOURCE]->(source:Source) "
+            "WHERE type(link) IN ['SOURCED_FROM','MODELED_BY'] RETURN "
+            "entity.id, labels(entity), type(link), record.id, "
+            "record.source_record_id, record.truth_label, record.observed_fields, "
+            "record.modeled_fields, source.id, source.label, source.url "
+            "ORDER BY entity.id"
+        ).result_set[:limit]
+        return [
+            {
+                "entity_id": row[0], "entity_labels": list(row[1] or []),
+                "relationship": row[2], "record_node_id": row[3],
+                "source_record_id": row[4], "truth_label": row[5],
+                "observed_fields": _list_value(row[6]),
+                "modeled_fields": _list_value(row[7]), "source_id": row[8],
+                "source_label": row[9], "source_url": row[10],
             }
             for row in rows
         ]
@@ -771,21 +983,242 @@ class GroundGraphEngine:
         rows = self.backend.query(
             "MATCH (m:Memory)-[:REMEMBERS]->(o:Outcome) RETURN m.id, m.strategy, "
             "m.disruption_signature, m.benefit_minutes, m.confidence, m.created_at, "
-            "o.id, o.status ORDER BY m.created_at DESC"
+            "o.id, o.status, m.event_class, m.context_json, m.flight_ids, "
+            "m.rotation_ids, m.resource_ids, m.policy_ids, o.plan_id "
+            "ORDER BY m.created_at DESC"
         ).result_set[:limit]
-        return [
-            {
-                "id": row[0], "strategy": row[1], "disruption_signature": row[2],
-                "benefit_minutes": int(row[3] or 0), "confidence": row[4],
-                "created_at": row[5], "outcome_id": row[6], "outcome_status": row[7],
-            }
-            for row in rows
-        ]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                context = json.loads(row[9]) if isinstance(row[9], str) else {}
+            except (TypeError, json.JSONDecodeError):
+                context = {}
+            result.append(
+                {
+                    "id": row[0], "strategy": row[1],
+                    "disruption_signature": row[2],
+                    "benefit_minutes": int(row[3] or 0), "confidence": row[4],
+                    "created_at": row[5], "outcome_id": row[6],
+                    "outcome_status": row[7], "event_class": row[8],
+                    "context": context,
+                    "flight_ids": _list_value(row[10]),
+                    "rotation_ids": _list_value(row[11]),
+                    "resource_ids": _list_value(row[12]),
+                    "policy_ids": _list_value(row[13]),
+                    "plan_id": row[14],
+                }
+            )
+        return result
 
-    def _handoffs(self, limit: int = 12) -> list[dict[str, Any]]:
+    def _memory_lineages(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.backend.query(
-            "MATCH (h:Handoff) RETURN h.id, h.from_agent, h.to_agent, h.status, "
-            "h.summary, h.evidence_ids, h.state_version, h.cycle, h.created_at "
+            "MATCH (d:DecisionEpisode)-[:SELECTED]->(p:Plan)-[:RESULTED_IN]->"
+            "(o:Outcome)<-[:REMEMBERS]-(m:Memory) RETURN "
+            "d.id, d.cycle, d.trigger, d.status, d.summary, d.based_on_version, "
+            "d.created_at, d.disruption_signature, d.event_class, d.context_json, "
+            "p.id, p.cycle, p.strategy, p.status, p.based_on_version, p.cost_score, "
+            "p.projected_delay, p.payload_json, p.created_at, p.applied_at, "
+            "o.id, o.status, o.projected_delay, o.benefit_minutes, o.created_at, "
+            "m.id, m.strategy, m.disruption_signature, m.event_class, m.context_json, "
+            "m.flight_ids, m.rotation_ids, m.resource_ids, m.policy_ids, "
+            "m.benefit_minutes, m.confidence, m.created_at "
+            "ORDER BY m.created_at DESC"
+        ).result_set[:limit]
+        lineages: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row[17]) if isinstance(row[17], str) else {}
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            try:
+                context = json.loads(row[29]) if isinstance(row[29], str) else {}
+            except (TypeError, json.JSONDecodeError):
+                context = {}
+            lineages.append(
+                {
+                    "episode": {
+                        "id": row[0], "cycle": int(row[1] or 0),
+                        "trigger": row[2], "status": row[3], "summary": row[4],
+                        "based_on_version": int(row[5] or 0), "created_at": row[6],
+                        "disruption_signature": row[7], "event_class": row[8],
+                        "context_json": row[9],
+                    },
+                    "plan": {
+                        "id": row[10], "cycle": int(row[11] or 0),
+                        "strategy": row[12], "status": row[13],
+                        "based_on_version": int(row[14] or 0),
+                        "cost_score": row[15], "projected_delay": row[16],
+                        "payload": payload, "created_at": row[18],
+                        "applied_at": row[19],
+                    },
+                    "outcome": {
+                        "id": row[20], "status": row[21],
+                        "projected_delay": row[22], "benefit_minutes": row[23],
+                        "created_at": row[24],
+                    },
+                    "memory": {
+                        "id": row[25], "strategy": row[26],
+                        "disruption_signature": row[27], "event_class": row[28],
+                        "context": context, "flight_ids": _list_value(row[30]),
+                        "rotation_ids": _list_value(row[31]),
+                        "resource_ids": _list_value(row[32]),
+                        "policy_ids": _list_value(row[33]),
+                        "benefit_minutes": int(row[34] or 0),
+                        "confidence": row[35], "created_at": row[36],
+                    },
+                }
+            )
+        return lineages
+
+    def _episode_handoff_lineages(self) -> list[dict[str, Any]]:
+        """Return the specialist evidence chains consumed by applied episodes."""
+
+        rows = self.backend.query(
+            "MATCH (d:DecisionEpisode)-[:SELECTED]->(p:Plan) "
+            "WHERE p.status = 'APPLIED' "
+            "MATCH (d)-[:CONSUMED_HANDOFF]->(h:Handoff) "
+            "MATCH (f:Finding)-[:PACKAGED_AS]->(h) "
+            "MATCH (r:AgentRun)-[:PRODUCED]->(f) RETURN "
+            "d.id, "
+            "h.id, h.from_agent, h.to_agent, h.status, h.summary, "
+            "h.evidence_ids, h.state_version, h.cycle, h.created_at, "
+            "h.query_name, h.started_at, h.ended_at, h.duration_ms, "
+            "h.consumed_at, "
+            "f.id, f.agent_id, f.cycle, f.severity, f.summary, "
+            "f.recommendation, f.action_type, f.evidence_ids, "
+            "f.based_on_version, f.query_name, f.started_at, f.ended_at, "
+            "f.duration_ms, f.created_at, "
+            "r.id, r.agent_id, r.cycle, r.status, r.based_on_version, "
+            "r.query_name, r.started_at, r.ended_at, r.duration_ms, "
+            "r.created_at ORDER BY d.created_at, h.created_at"
+        ).result_set
+        lineages: list[dict[str, Any]] = []
+        for row in rows:
+            lineages.append(
+                {
+                    "episode_id": row[0],
+                    "handoff": {
+                        "id": row[1], "from_agent": row[2],
+                        "to_agent": row[3], "status": row[4],
+                        "summary": row[5], "evidence_ids": _list_value(row[6]),
+                        "state_version": int(row[7] or 0),
+                        "cycle": int(row[8] or 0), "created_at": row[9],
+                        "query_name": row[10], "started_at": row[11],
+                        "ended_at": row[12], "duration_ms": int(row[13] or 0),
+                        "consumed_at": row[14],
+                    },
+                    "finding": {
+                        "id": row[15], "agent_id": row[16],
+                        "cycle": int(row[17] or 0), "severity": row[18],
+                        "summary": row[19], "recommendation": row[20],
+                        "action_type": row[21],
+                        "evidence_ids": _list_value(row[22]),
+                        "based_on_version": int(row[23] or 0),
+                        "query_name": row[24], "started_at": row[25],
+                        "ended_at": row[26], "duration_ms": int(row[27] or 0),
+                        "created_at": row[28],
+                    },
+                    "run": {
+                        "id": row[29], "agent_id": row[30],
+                        "cycle": int(row[31] or 0), "status": row[32],
+                        "based_on_version": int(row[33] or 0),
+                        "query_name": row[34], "started_at": row[35],
+                        "ended_at": row[36], "duration_ms": int(row[37] or 0),
+                        "created_at": row[38],
+                    },
+                }
+            )
+        return lineages
+
+    def _applied_episode_coordinator_traces(self) -> list[dict[str, Any]]:
+        """Return coordinator runs, tools, and models for applied episodes only."""
+
+        traces: dict[str, dict[str, Any]] = {}
+        run_rows = self.backend.query(
+            "MATCH (d:DecisionEpisode)-[:SELECTED]->(p:Plan) "
+            "WHERE p.status = 'APPLIED' "
+            "MATCH (d)-[:USED_RUN]->(r:AgentRun) "
+            "WHERE r.agent_id = 'AGENT-COORD' RETURN "
+            "d.id, p.id, r.id, r.agent_id, r.cycle, r.status, "
+            "r.based_on_version, r.decision_source, r.started_at, r.ended_at, "
+            "r.created_at ORDER BY d.created_at"
+        ).result_set
+        for row in run_rows:
+            episode_id = str(row[0])
+            traces[episode_id] = {
+                "episode_id": episode_id,
+                "plan_id": row[1],
+                "run": {
+                    "id": row[2], "agent_id": row[3],
+                    "cycle": int(row[4] or 0), "status": row[5],
+                    "based_on_version": int(row[6] or 0),
+                    "decision_source": row[7], "started_at": row[8],
+                    "ended_at": row[9], "created_at": row[10],
+                },
+                "tools": [],
+                "model": None,
+            }
+
+        tool_rows = self.backend.query(
+            "MATCH (d:DecisionEpisode)-[:SELECTED]->(p:Plan) "
+            "WHERE p.status = 'APPLIED' "
+            "MATCH (d)-[:USED_TOOL]->(t:ToolCall) RETURN "
+            "d.id, t.id, t.name, t.transport, t.arguments_json, "
+            "t.evidence_ids, t.result_summary, t.status, t.sequence, t.cycle, "
+            "t.created_at ORDER BY d.created_at, t.sequence"
+        ).result_set
+        for row in tool_rows:
+            trace = traces.get(str(row[0]))
+            if trace is None:
+                continue
+            try:
+                arguments = (
+                    json.loads(row[4]) if isinstance(row[4], str) else {}
+                )
+            except (TypeError, json.JSONDecodeError):
+                arguments = {}
+            trace["tools"].append(
+                {
+                    "id": row[1], "name": row[2], "transport": row[3],
+                    "arguments_json": arguments,
+                    "evidence_ids": _list_value(row[5]),
+                    "result_summary": row[6], "status": row[7],
+                    "sequence": int(row[8] or 0),
+                    "cycle": int(row[9] or 0), "created_at": row[10],
+                }
+            )
+
+        model_rows = self.backend.query(
+            "MATCH (d:DecisionEpisode)-[:SELECTED]->(p:Plan) "
+            "WHERE p.status = 'APPLIED' "
+            "MATCH (d)-[:USED_MODEL]->(m:ModelRun) RETURN "
+            "d.id, p.id, m.id, m.provider, m.model, "
+            "m.selected_candidate_id, m.allowlisted_candidate_ids, "
+            "m.cost_direction, m.decision_source, m.summary, m.created_at "
+            "ORDER BY d.created_at"
+        ).result_set
+        for row in model_rows:
+            trace = traces.get(str(row[0]))
+            if trace is None:
+                continue
+            trace["plan_id"] = row[1]
+            trace["model"] = {
+                "id": row[2], "provider": row[3], "model": row[4],
+                "selected_candidate_id": row[5],
+                "allowlisted_candidate_ids": _list_value(row[6]),
+                "cost_direction": row[7], "decision_source": row[8],
+                "summary": row[9], "created_at": row[10],
+            }
+        return list(traces.values())
+
+    def _handoffs(self, limit: int = 60) -> list[dict[str, Any]]:
+        rows = self.backend.query(
+            "MATCH (h:Handoff) "
+            "OPTIONAL MATCH (d:DecisionEpisode)-[:CONSUMED_HANDOFF]->(h) "
+            "RETURN h.id, h.from_agent, h.to_agent, h.status, "
+            "h.summary, h.evidence_ids, h.state_version, h.cycle, h.created_at, "
+            "h.query_name, h.started_at, h.ended_at, h.duration_ms, h.consumed_at, "
+            "d.id "
             "ORDER BY h.created_at DESC"
         ).result_set[:limit]
         handoffs = []
@@ -799,9 +1232,64 @@ class GroundGraphEngine:
                     "id": row[0], "from_agent": row[1], "to_agent": row[2],
                     "status": row[3], "summary": row[4], "evidence_ids": evidence,
                     "state_version": int(row[6]), "cycle": int(row[7]), "created_at": row[8],
+                    "query_name": row[9], "started_at": row[10],
+                    "ended_at": row[11], "duration_ms": int(row[12] or 0),
+                    "consumed_at": row[13],
+                    "episode_id": row[14],
                 }
             )
         return handoffs
+
+    def _tool_trace(self, limit: int = 16) -> list[dict[str, Any]]:
+        rows = self.backend.query(
+            "MATCH (d:DecisionEpisode)-[:USED_TOOL]->(t:ToolCall) RETURN "
+            "t.id, t.name, t.transport, t.arguments_json, t.evidence_ids, "
+            "t.result_summary, t.status, t.sequence, t.cycle, t.created_at, d.id "
+            "ORDER BY t.created_at DESC, t.sequence"
+        ).result_set[:limit]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                arguments = json.loads(row[3]) if isinstance(row[3], str) else {}
+            except (TypeError, json.JSONDecodeError):
+                arguments = {}
+            result.append(
+                {
+                    "id": row[0], "name": row[1], "transport": row[2],
+                    "arguments": arguments, "evidence_ids": _list_value(row[4]),
+                    "result_summary": row[5], "status": row[6],
+                    "sequence": int(row[7] or 0), "cycle": int(row[8] or 0),
+                    "created_at": row[9], "episode_id": row[10],
+                }
+            )
+        return result
+
+    def _model_trace(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Return persisted coordinator model runs and their exact allowlists."""
+
+        rows = self.backend.query(
+            "MATCH (d:DecisionEpisode)-[:USED_MODEL]->(m:ModelRun) RETURN "
+            "m.id, m.provider, m.model, m.selected_candidate_id, "
+            "m.allowlisted_candidate_ids, m.cost_direction, m.decision_source, "
+            "m.summary, m.created_at, d.id, d.cycle "
+            "ORDER BY m.created_at DESC"
+        ).result_set[:limit]
+        return [
+            {
+                "id": row[0],
+                "provider": row[1],
+                "model": row[2],
+                "selected_candidate_id": row[3],
+                "allowlisted_candidate_ids": _list_value(row[4]),
+                "cost_direction": row[5],
+                "decision_source": row[6],
+                "summary": row[7],
+                "created_at": row[8],
+                "episode_id": row[9],
+                "cycle": int(row[10] or 0),
+            }
+            for row in rows
+        ]
 
     def _current_plan(self) -> dict[str, Any] | None:
         rows = self.backend.query(
@@ -811,6 +1299,12 @@ class GroundGraphEngine:
         if not rows:
             return None
         payload = _normalize_plan_payload(json.loads(rows[0][0]))
+        context = payload.get("causal_context", {})
+        if isinstance(context, Mapping):
+            payload["causal_path"] = self._graph_causal_path(
+                _list_value(context.get("event_ids")),
+                _list_value(context.get("action_ids")),
+            )
         payload["status"] = rows[0][1]
         payload["based_on_version"] = int(rows[0][2])
         return payload
@@ -832,6 +1326,12 @@ class GroundGraphEngine:
         if not rows:
             return None
         payload = _normalize_plan_payload(json.loads(rows[0][0]))
+        context = payload.get("causal_context", {})
+        if isinstance(context, Mapping):
+            payload["causal_path"] = self._graph_causal_path(
+                _list_value(context.get("event_ids")),
+                _list_value(context.get("action_ids")),
+            )
         payload["status"] = rows[0][1]
         payload["based_on_version"] = int(rows[0][2])
         payload["applied_at"] = rows[0][3] or payload.get("applied_at")
@@ -864,99 +1364,228 @@ class GroundGraphEngine:
             for row in rows
         ]
 
-    @staticmethod
     def _specialist_job(
+        self,
         agent_id: str,
-        flights: list[dict[str, Any]],
-        events: list[dict[str, Any]],
-        resources: list[dict[str, Any]],
-        policies: list[dict[str, Any]],
-        memories: list[dict[str, Any]],
+        state_version: int,
+        disruption_context: Mapping[str, Any],
+        start_barrier: threading.Barrier,
     ) -> dict[str, Any]:
-        active = [event for event in events if event["status"] == "ACTIVE"]
-        delayed = [flight for flight in flights if flight["delay_minutes"] > 0]
-        if agent_id == "AGENT-WEATHER":
-            weather = [event for event in active if event["type"] in {"LOW_VISIBILITY_SNOW", "WEATHER_UPDATE", "WEATHER", "WIND"}]
-            observed = [
-                event
-                for event in weather
-                if event["source_kind"] in {"OBSERVED", "MIXED"}
-                and event.get("observed_fields")
-            ]
-            summary = f"Weather read {len(observed)} observed active update(s); {len(weather)} weather condition(s) are visible at this replay time."
-            return {"agent_id": agent_id, "severity": "HIGH" if any(item["severity"] == "HIGH" for item in weather) else "WATCH", "summary": summary, "recommendation": "Use only weather observations available at the current replay clock.", "action_type": "RESEQUENCE_DEPARTURE", "evidence_ids": [event["id"] for event in weather]}
-        if agent_id == "AGENT-FLOW":
-            flow_events = [event for event in active if event["type"] in {"RUNWAY_CAPACITY", "RUNWAY_OCCUPANCY_CHECK", "LOW_VISIBILITY_SNOW", "WEATHER_UPDATE", "WEATHER", "WIND"}]
-            runway_ids = [item["id"] for item in resources if item["type"] == "RUNWAY"]
-            summary = (
-                f"Flow checked {len(runway_ids)} runways and {len(flow_events)} active capacity constraint(s); "
-                f"{len(delayed)} flight(s) currently carry delay."
+        """Run one specialist's real graph read on the shared input version.
+
+        Official FalkorDB uses an independent connection per worker so the reads
+        can overlap.  FalkorDBLite keeps the single embedded connection, while the
+        same barrier and domain-specific Cypher path are retained for tests.
+        """
+
+        worker_backend: GraphBackend | None = None
+        backend = self.backend
+        if self.backend.mode == "server":
+            worker_backend = GraphBackend(
+                mode="server", graph_name=self.backend.graph_name
             )
-            return {"agent_id": agent_id, "severity": "HIGH" if flow_events else "WATCH", "summary": summary, "recommendation": "Resequence departures inside the modeled runway envelope.", "action_type": "SEQUENCE_DEPARTURES", "evidence_ids": [event["id"] for event in flow_events] + runway_ids}
-        if agent_id == "AGENT-GATE":
-            gates = [item["id"] for item in resources if item["type"] == "GATE" and item["status"] in {"OPEN", "AVAILABLE"}]
-            summary = f"Gate checked {len(gates)} open positions against {len(delayed)} delayed flight(s)."
-            return {"agent_id": agent_id, "severity": "MEDIUM" if delayed else "WATCH", "summary": summary, "recommendation": "Keep a compatible recovery gate available for the affected rotation.", "action_type": "ASSIGN_GATE", "evidence_ids": [flight["id"] for flight in delayed] + gates}
-        if agent_id == "AGENT-POLICY":
-            covered = sorted({action for policy in policies for action in policy.get("action_types", [])})
-            summary = f"Policy verified {len(policies)} current version(s) covering {len(covered)} authorized action type(s)."
-            return {"agent_id": agent_id, "severity": "CLEAR" if policies else "HIGH", "summary": summary, "recommendation": "Permit only actions linked to a current version and named owner.", "action_type": "APPLY_VALIDATED_PLAN", "evidence_ids": [policy["id"] for policy in policies]}
-        if agent_id == "AGENT-MEMORY":
-            successful = [item for item in memories if item.get("outcome_status") == "SUCCESS"]
-            summary = f"Memory recalled {len(successful)} successful related outcome(s) from FalkorDB."
-            return {"agent_id": agent_id, "severity": "INFORMED" if successful else "NEW", "summary": summary, "recommendation": "Apply only outcome-backed score adjustments and retain the base ranking for audit.", "action_type": "APPLY_VALIDATED_PLAN", "evidence_ids": [item["id"] for item in successful]}
-        bag_events = [event for event in active if event["type"] in {"BAGGAGE_DELAY", "BAG_RECONCILIATION_DELAY", "TURNAROUND_DELAY"}]
-        rotations = sorted({str(flight["rotation_id"]) for flight in delayed})
-        summary = f"Turnaround traced {len(bag_events)} active ground delay(s) across {len(rotations)} affected rotation(s)."
-        return {"agent_id": agent_id, "severity": "HIGH" if bag_events else "WATCH", "summary": summary, "recommendation": "Protect the next leg with a bounded turnaround recovery team.", "action_type": "ACCELERATE_TURNAROUND", "evidence_ids": [event["id"] for event in bag_events] + rotations}
+            backend = worker_backend
+        query_name = "unknown"
+        started_at = _utc_now()
+        start_clock = time.perf_counter()
+        try:
+            start_barrier.wait(timeout=5)
+            started_at = _utc_now()
+            start_clock = time.perf_counter()
+
+            if agent_id == "AGENT-WEATHER":
+                query_name = "active_weather_observations"
+                rows = backend.query(
+                    "MATCH (e:OperationalEvent) WHERE e.status = 'ACTIVE' AND "
+                    "e.type IN ['LOW_VISIBILITY_SNOW','WEATHER_UPDATE','WEATHER','WIND'] "
+                    "RETURN e.id, e.severity, e.source_kind, e.observed_fields "
+                    "ORDER BY e.at_minute"
+                ).result_set
+                evidence_ids = [str(row[0]) for row in rows]
+                observed = sum(
+                    1
+                    for row in rows
+                    if row[2] in {"OBSERVED", "MIXED"} and _list_value(row[3])
+                )
+                severity = "HIGH" if any(row[1] == "HIGH" for row in rows) else "WATCH"
+                summary = (
+                    f"Weather queried FalkorDB version {state_version}: "
+                    f"{observed} observed update(s), {len(rows)} active condition(s)."
+                )
+                recommendation = "Use only observations available by the replay clock."
+                action_type = "RESEQUENCE_DEPARTURE"
+            elif agent_id == "AGENT-FLOW":
+                query_name = "runway_capacity_neighborhood"
+                rows = backend.query(
+                    "MATCH (r:Runway) OPTIONAL MATCH (e:OperationalEvent)-[:CONSTRAINS]->(r) "
+                    "RETURN r.id, r.status, r.capacity_per_hour, e.id, e.status, e.capacity_delta "
+                    "ORDER BY r.id, e.at_minute"
+                ).result_set
+                active_rows = [row for row in rows if row[3] and row[4] == "ACTIVE"]
+                evidence_ids = sorted(
+                    {str(row[0]) for row in rows}
+                    | {str(row[3]) for row in active_rows}
+                )
+                summary = (
+                    f"Flow queried {len({row[0] for row in rows})} runway(s) and "
+                    f"{len(active_rows)} active capacity constraint(s) at graph version {state_version}."
+                )
+                severity = "HIGH" if active_rows else "WATCH"
+                recommendation = "Resequence only on a runway used by the target flight."
+                action_type = "RESEQUENCE_DEPARTURE"
+            elif agent_id == "AGENT-GATE":
+                query_name = "compatible_gate_options"
+                rows = backend.query(
+                    "MATCH (f:Flight)-[:COMPATIBLE_WITH]->(g:Gate) "
+                    "WHERE f.kind = 'OUTBOUND' "
+                    "RETURN f.id, g.id, g.status, f.delay_minutes ORDER BY f.id, g.id"
+                ).result_set
+                open_rows = [row for row in rows if row[2] in {"OPEN", "AVAILABLE"}]
+                evidence_ids = sorted(
+                    {str(row[0]) for row in open_rows}
+                    | {str(row[1]) for row in open_rows}
+                )
+                summary = (
+                    f"Gate queried {len(open_rows)} compatible open flight-gate pair(s) "
+                    f"at graph version {state_version}."
+                )
+                severity = "MEDIUM" if open_rows else "HIGH"
+                recommendation = "Use only an explicit COMPATIBLE_WITH relationship."
+                action_type = "REASSIGN_GATE"
+            elif agent_id == "AGENT-TURN":
+                query_name = "turnaround_dependency_dag"
+                rows = backend.query(
+                    "MATCH (t:Turnaround)-[:HAS_TASK]->(task:TurnaroundTask) "
+                    "OPTIONAL MATCH (e:OperationalEvent)-[:DELAYS]->(task) "
+                    "RETURN t.id, t.rotation_id, t.current_critical_path_minutes, "
+                    "task.id, task.status, e.id, e.status ORDER BY t.id, task.id"
+                ).result_set
+                delayed_rows = [row for row in rows if row[5] and row[6] == "ACTIVE"]
+                evidence_ids = sorted(
+                    {str(row[0]) for row in rows}
+                    | {str(row[3]) for row in rows}
+                    | {str(row[5]) for row in delayed_rows}
+                )
+                summary = (
+                    f"Turnaround queried {len({row[0] for row in rows})} dependency DAG(s); "
+                    f"{len(delayed_rows)} task delay edge(s) are active at version {state_version}."
+                )
+                severity = "HIGH" if delayed_rows else "WATCH"
+                recommendation = "Resequence only tasks connected by the stored dependency DAG."
+                action_type = "RESEQUENCE_TASKS"
+            elif agent_id == "AGENT-POLICY":
+                query_name = "current_policy_authority"
+                rows = backend.query(
+                    "MATCH (p:Policy) WHERE p.current = true "
+                    "RETURN p.id, p.status, p.action_types, p.freshness_status, "
+                    "p.owner_team_id, p.responsible_role_id ORDER BY p.id"
+                ).result_set
+                evidence_ids = [str(row[0]) for row in rows]
+                covered = {
+                    action for row in rows for action in _list_value(row[2])
+                }
+                current = [
+                    row
+                    for row in rows
+                    if row[1] == "CURRENT" and row[3] == "CURRENT_FOR_REPLAY"
+                ]
+                summary = (
+                    f"Policy queried {len(current)} current version(s) covering "
+                    f"{len(covered)} action type(s) at graph version {state_version}."
+                )
+                severity = "CLEAR" if current else "HIGH"
+                recommendation = "Permit only current, owned, source-linked authority."
+                action_type = "APPLY_VALIDATED_PLAN"
+            else:
+                query_name = "contextual_successful_memory"
+                rows = backend.query(
+                    "MATCH (m:Memory)-[:REMEMBERS]->(o:Outcome) "
+                    "WHERE o.status = 'SUCCESS' "
+                    "RETURN m.id, m.event_class, m.context_json, m.strategy, o.id "
+                    "ORDER BY m.created_at DESC"
+                ).result_set
+                event_class = str(disruption_context.get("event_class", ""))
+                related = [row for row in rows if str(row[1] or "") == event_class]
+                evidence_ids = [str(row[0]) for row in related]
+                summary = (
+                    f"Memory queried {len(rows)} successful episode(s); {len(related)} "
+                    f"matched the {event_class or 'current'} disruption context at version {state_version}."
+                )
+                severity = "INFORMED" if related else "NEW"
+                recommendation = "Adjust cost only with context-matched outcome evidence."
+                action_type = "APPLY_VALIDATED_PLAN"
+
+            ended_at = _utc_now()
+            return {
+                "agent_id": agent_id,
+                "severity": severity,
+                "summary": summary,
+                "recommendation": recommendation,
+                "action_type": action_type,
+                "evidence_ids": evidence_ids,
+                "query_name": query_name,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "duration_ms": max(0, int((time.perf_counter() - start_clock) * 1000)),
+                "based_on_version": state_version,
+            }
+        finally:
+            if worker_backend is not None:
+                worker_backend.close()
 
     def _record_specialists(
         self,
         *,
         cycle: int,
+        decision_token: str,
         state_version: int,
         flights: list[dict[str, Any]],
         events: list[dict[str, Any]],
         resources: list[dict[str, Any]],
         policies: list[dict[str, Any]],
         memories: list[dict[str, Any]],
+        disruption_context: Mapping[str, Any],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         self.backend.query(
             "MATCH (a:Agent) WHERE a.id <> 'AGENT-COORD' SET a.status = 'ANALYZING', "
             "a.current_task = 'Reading shared graph state'"
         )
-        started_at = _utc_now()
+        start_barrier = threading.Barrier(len(SPECIALISTS))
         with ThreadPoolExecutor(max_workers=6, thread_name_prefix="groundgraph-agent") as pool:
             futures = [
                 pool.submit(
                     self._specialist_job,
                     agent_id,
-                    deepcopy(flights),
-                    deepcopy(events),
-                    deepcopy(resources),
-                    deepcopy(policies),
-                    deepcopy(memories),
+                    state_version,
+                    dict(disruption_context),
+                    start_barrier,
                 )
                 for agent_id, _name, _role in SPECIALISTS
             ]
-            findings = [future.result(timeout=5) for future in futures]
+            findings = [future.result(timeout=15) for future in futures]
         handoffs: list[dict[str, Any]] = []
         for finding in findings:
             agent_id = str(finding["agent_id"])
             short = agent_id.removeprefix("AGENT-")
-            run_id = f"RUN-{cycle}-{short}"
-            finding_id = f"FINDING-{cycle}-{short}"
-            handoff_id = f"HANDOFF-{cycle}-{short}-COORD"
-            created_at = _utc_now()
-            self._create_node("AgentRun", {"id": run_id, "agent_id": agent_id, "cycle": cycle, "status": "COMPLETED", "based_on_version": state_version, "started_at": started_at, "ended_at": created_at, "created_at": created_at})
-            self._create_node("Finding", {"id": finding_id, "agent_id": agent_id, "cycle": cycle, "severity": finding["severity"], "summary": finding["summary"], "recommendation": finding["recommendation"], "action_type": finding["action_type"], "evidence_ids": finding["evidence_ids"], "based_on_version": state_version, "created_at": created_at})
-            self._create_node("Handoff", {"id": handoff_id, "from_agent": agent_id, "to_agent": "AGENT-COORD", "status": "AVAILABLE", "summary": finding["summary"], "evidence_ids": finding["evidence_ids"], "state_version": state_version, "cycle": cycle, "created_at": created_at})
+            run_id = f"RUN-{cycle}-{decision_token}-{short}"
+            finding_id = f"FINDING-{cycle}-{decision_token}-{short}"
+            handoff_id = f"HANDOFF-{cycle}-{decision_token}-{short}-COORD"
+            created_at = finding["ended_at"]
+            shared = {
+                "query_name": finding["query_name"],
+                "started_at": finding["started_at"],
+                "ended_at": finding["ended_at"],
+                "duration_ms": finding["duration_ms"],
+            }
+            self._create_node("AgentRun", {"id": run_id, "agent_id": agent_id, "cycle": cycle, "status": "COMPLETED", "based_on_version": state_version, **shared, "created_at": created_at})
+            self._create_node("Finding", {"id": finding_id, "agent_id": agent_id, "cycle": cycle, "severity": finding["severity"], "summary": finding["summary"], "recommendation": finding["recommendation"], "action_type": finding["action_type"], "evidence_ids": finding["evidence_ids"], "based_on_version": state_version, **shared, "created_at": created_at})
+            self._create_node("Handoff", {"id": handoff_id, "from_agent": agent_id, "to_agent": "AGENT-COORD", "status": "AVAILABLE", "summary": finding["summary"], "evidence_ids": finding["evidence_ids"], "state_version": state_version, "cycle": cycle, **shared, "created_at": created_at})
             self._create_edge(agent_id, "STARTED", run_id)
             self._create_edge(run_id, "PRODUCED", finding_id)
             self._create_edge(finding_id, "PACKAGED_AS", handoff_id)
             self._create_edge(handoff_id, "DELIVERED_TO", "AGENT-COORD")
             self.backend.query("MATCH (a:Agent {id: $id}) SET a.status = 'WAITING', a.current_task = 'Handoff delivered', a.last_run_id = $run, a.last_cycle = $cycle", {"id": agent_id, "run": run_id, "cycle": cycle})
-            handoffs.append({"id": handoff_id, "from_agent": agent_id, "to_agent": "AGENT-COORD", "status": "AVAILABLE", "summary": finding["summary"], "evidence_ids": list(finding["evidence_ids"]), "state_version": state_version, "cycle": cycle, "created_at": created_at})
+            handoffs.append({"id": handoff_id, "from_agent": agent_id, "to_agent": "AGENT-COORD", "status": "AVAILABLE", "summary": finding["summary"], "evidence_ids": list(finding["evidence_ids"]), "state_version": state_version, "cycle": cycle, **shared, "created_at": created_at})
         return findings, handoffs
 
     @staticmethod
@@ -967,59 +1596,166 @@ class GroundGraphEngine:
                 index[str(action_type)] = dict(policy)
         return index
 
+    def _disruption_context(
+        self,
+        active_events: Iterable[Mapping[str, Any]],
+        flights: Iterable[Mapping[str, Any]],
+        policies: Iterable[Mapping[str, Any]] = (),
+    ) -> dict[str, Any]:
+        events = [dict(item) for item in active_events]
+        flight_index = {str(item["id"]): dict(item) for item in flights}
+        event_types = sorted({str(item.get("type", "UNKNOWN")) for item in events})
+        if any("BAG" in item or "TURNAROUND" in item for item in event_types):
+            event_class = "TURNAROUND"
+        elif any(item in {"LOW_VISIBILITY_SNOW", "WEATHER_UPDATE", "WEATHER", "WIND"} for item in event_types):
+            event_class = "WEATHER"
+        elif any("RUNWAY" in item or "CAPACITY" in item for item in event_types):
+            event_class = "RUNWAY"
+        else:
+            event_class = event_types[0] if event_types else "MONITORING"
+        flight_ids = sorted(
+            {str(item["flight_id"]) for item in events if item.get("flight_id")}
+        )
+        rotation_ids = sorted(
+            {
+                str(flight_index[flight_id].get("rotation_id"))
+                for flight_id in flight_ids
+                if flight_id in flight_index
+                and flight_index[flight_id].get("rotation_id")
+            }
+        )
+        resource_ids = sorted(
+            {str(item["resource_id"]) for item in events if item.get("resource_id")}
+        )
+        policy_ids = sorted(
+            {str(item["id"]) for item in policies if item.get("id")}
+        )
+        context = {
+            "airport": str(self.scenario_data.get("airport", "ORD")),
+            "event_class": event_class,
+            "event_types": event_types,
+            "event_ids": sorted(str(item["id"]) for item in events),
+            "flight_ids": flight_ids,
+            "rotation_ids": rotation_ids,
+            "resource_ids": resource_ids,
+            "policy_ids": policy_ids,
+        }
+        context["signature"] = _hash(context)[:20]
+        return context
+
+    @staticmethod
+    def _context_matches(
+        memory: Mapping[str, Any], context: Mapping[str, Any]
+    ) -> bool:
+        """Require the same disruption class plus relevant graph overlap.
+
+        Weather episodes can match through a runway resource; ground episodes
+        require a shared flight or rotation.  This prevents a baggage recovery
+        from silently changing a later weather decision.
+        """
+
+        if str(memory.get("event_class", "")) != str(context.get("event_class", "")):
+            return False
+        old = memory.get("context") if isinstance(memory.get("context"), Mapping) else memory
+        event_class = str(context.get("event_class", ""))
+        dimensions = (
+            ("resource_ids",)
+            if event_class in {"WEATHER", "RUNWAY"}
+            else ("flight_ids", "rotation_ids", "resource_ids")
+        )
+        for key in dimensions:
+            left = {str(item) for item in _list_value(old.get(key))}
+            right = {str(item) for item in _list_value(context.get(key))}
+            if left and right and left.intersection(right):
+                return True
+        # An exact class is enough only when neither episode has a more precise
+        # entity key, which keeps sparse historical memory usable and auditable.
+        has_old_keys = any(_list_value(old.get(key)) for key in dimensions)
+        has_new_keys = any(_list_value(context.get(key)) for key in dimensions)
+        return not has_old_keys and not has_new_keys
+
     def _candidate_actions(
         self,
         *,
         cycle: int,
+        decision_token: str,
         flights: list[dict[str, Any]],
         resources: list[dict[str, Any]],
+        active_events: list[dict[str, Any]],
         policy_index: Mapping[str, Mapping[str, Any]],
     ) -> list[dict[str, Any]]:
         delayed = sorted(
             (flight for flight in flights if flight["delay_minutes"] > 0),
             key=lambda item: (-item["delay_minutes"], item["id"]),
         )
-        target_flight = (
-            delayed[0]["id"]
-            if delayed
-            else max(flights, key=lambda item: int(item["scheduled_minute"]))["id"]
-        )
-        target = next(item for item in flights if item["id"] == target_flight)
-        rotation_target = next(
+        event_flight_id = next(
             (
-                flight["id"]
+                str(event["flight_id"])
+                for event in active_events
+                if event.get("flight_id")
+            ),
+            None,
+        )
+        seed_flight = next(
+            (item for item in flights if item["id"] == event_flight_id),
+            delayed[0] if delayed else None,
+        )
+        if seed_flight is None:
+            seed_flight = max(
+                (item for item in flights if item["kind"] == "OUTBOUND"),
+                key=lambda item: int(item["scheduled_minute"]),
+            )
+        rotation_id = str(seed_flight["rotation_id"])
+        outbound = next(
+            (
+                flight
                 for flight in flights
-                if flight["rotation_id"] == target["rotation_id"]
+                if flight["rotation_id"] == rotation_id
                 and flight["kind"] == "OUTBOUND"
-                and int(flight["scheduled_minute"])
-                >= int(target["scheduled_minute"])
             ),
-            target_flight,
+            seed_flight,
         )
-        gates = [item["id"] for item in resources if item["type"] == "GATE" and item["status"] in {"OPEN", "AVAILABLE"}]
-        runways = sorted(
+        inbound = next(
             (
-                item
-                for item in resources
-                if item["type"] == "RUNWAY"
-                and item["status"] in {"OPEN", "LIMITED", "STANDBY"}
+                flight
+                for flight in flights
+                if flight["rotation_id"] == rotation_id
+                and flight["kind"] == "INBOUND"
             ),
-            key=lambda item: (
-                item.get("role") != "DEPARTURE",
-                {"OPEN": 0, "LIMITED": 1, "STANDBY": 2}.get(
-                    str(item.get("status")), 3
-                ),
-                item["id"],
-            ),
+            seed_flight,
         )
+        runway_id = str(outbound.get("runway") or "")
+        if not runway_id:
+            runway_id = next(
+                (
+                    str(item["id"])
+                    for item in resources
+                    if item["type"] == "RUNWAY"
+                    and item.get("role") == "DEPARTURE"
+                ),
+                "",
+            )
+        gate_rows = self.backend.query(
+            "MATCH (f:Flight {id: $flight})-[:COMPATIBLE_WITH]->(g:Gate) "
+            "WHERE g.status IN ['OPEN','AVAILABLE'] RETURN g.id ORDER BY g.id",
+            {"flight": outbound["id"]},
+        ).result_set
+        gate_id = str(gate_rows[0][0]) if gate_rows else ""
+        turn_rows = self.backend.query(
+            "MATCH (t:Turnaround {rotation_id: $rotation}) RETURN t.id",
+            {"rotation": rotation_id},
+        ).result_set
+        turnaround_id = str(turn_rows[0][0]) if turn_rows else ""
         targets = {
-            "RESEQUENCE_DEPARTURE": runways[0]["id"] if runways else "ORD-FLOW",
-            "REASSIGN_GATE": gates[-1] if gates else target_flight,
-            "PROTECT_ROTATION": rotation_target,
+            "RESEQUENCE_DEPARTURE": runway_id,
+            "REASSIGN_GATE": gate_id,
+            "RESEQUENCE_TASKS": turnaround_id,
+            "PROTECT_ROTATION": str(outbound["id"]),
         }
         descriptions = {
             "RESEQUENCE_DEPARTURE": "Re-sequence the modeled departure queue inside available runway capacity.",
             "REASSIGN_GATE": "Hold a compatible recovery gate for the affected aircraft rotation.",
+            "RESEQUENCE_TASKS": "Re-sequence the stored turnaround task DAG around the delayed baggage task.",
             "PROTECT_ROTATION": "Protect the next leg while preserving turnaround dependencies.",
         }
         actions = []
@@ -1032,8 +1768,11 @@ class GroundGraphEngine:
             )
             actions.append(
                 {
-                    "id": f"ACTION-{cycle}-{index}", "type": action_type,
+                    "id": f"ACTION-{cycle}-{decision_token}-{index}", "type": action_type,
                     "description": descriptions[action_type], "target_id": targets[action_type],
+                    "affected_flight_id": str(outbound["id"]),
+                    "inbound_flight_id": str(inbound["id"]),
+                    "rotation_id": rotation_id,
                     "policy_id": policy.get("id") if policy else None,
                     "authorized": policy_current,
                     "knowledge_current": knowledge_current,
@@ -1042,6 +1781,55 @@ class GroundGraphEngine:
             )
         return actions
 
+    def _action_graph_precondition(
+        self, action: Mapping[str, Any]
+    ) -> tuple[bool, str, list[str]]:
+        action_type = str(action.get("type", ""))
+        target_id = str(action.get("target_id", ""))
+        flight_id = str(action.get("affected_flight_id", ""))
+        inbound_id = str(action.get("inbound_flight_id", ""))
+        if not target_id:
+            return False, f"{action_type} has no graph target.", []
+        if action_type == "RESEQUENCE_DEPARTURE":
+            query = (
+                "MATCH (f:Flight {id: $flight})-[:USES]->(r:Runway {id: $target}) "
+                "RETURN count(r)"
+            )
+            detail = "Target flight uses the selected departure runway."
+            params = {"flight": flight_id, "target": target_id}
+            evidence = [flight_id, target_id]
+        elif action_type == "REASSIGN_GATE":
+            query = (
+                "MATCH (f:Flight {id: $flight})-[:COMPATIBLE_WITH]->"
+                "(g:Gate {id: $target}) WHERE g.status IN ['OPEN','AVAILABLE'] "
+                "RETURN count(g)"
+            )
+            detail = "Target flight has an explicit compatible, open gate edge."
+            params = {"flight": flight_id, "target": target_id}
+            evidence = [flight_id, target_id]
+        elif action_type == "RESEQUENCE_TASKS":
+            query = (
+                "MATCH (turn:Turnaround {id: $target})-[:HAS_TASK]->"
+                "(a:TurnaroundTask)-[:MUST_COMPLETE_BEFORE]->(b:TurnaroundTask) "
+                "RETURN count(a)"
+            )
+            detail = "Turnaround has a stored MUST_COMPLETE_BEFORE task dependency."
+            params = {"target": target_id}
+            evidence = [target_id]
+        elif action_type == "PROTECT_ROTATION":
+            query = (
+                "MATCH (a:Flight {id: $inbound})-[:ROTATES_TO]->"
+                "(b:Flight {id: $target}) RETURN count(b)"
+            )
+            detail = "Inbound flight rotates to the protected outbound leg."
+            params = {"inbound": inbound_id, "target": target_id}
+            evidence = [inbound_id, target_id]
+        else:
+            return False, f"Unsupported action type {action_type}.", []
+        rows = self.backend.query(query, params).result_set
+        passed = bool(rows and int(rows[0][0]) > 0)
+        return passed, detail if passed else f"Missing graph precondition: {detail}", evidence
+
     def _rank_candidates(
         self,
         *,
@@ -1049,45 +1837,121 @@ class GroundGraphEngine:
         active_delay: int,
         actions: list[dict[str, Any]],
         memories: list[dict[str, Any]],
+        active_events: list[dict[str, Any]],
+        disruption_context: Mapping[str, Any],
         clock_minute: int,
         flights: list[dict[str, Any]],
         resources: list[dict[str, Any]],
         churn_blocked: bool,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         definitions = (
-            ("FLOW_BALANCE", 18, 7),
-            ("GATE_SWAP", 14, 4),
-            ("TURNAROUND_RECOVERY", 10, 2),
+            ("FLOW_BALANCE", ("RESEQUENCE_DEPARTURE", "PROTECT_ROTATION")),
+            ("GATE_SWAP", ("REASSIGN_GATE", "PROTECT_ROTATION")),
+            ("TURNAROUND_RECOVERY", ("RESEQUENCE_TASKS", "PROTECT_ROTATION")),
         )
-        latest = memories[0] if memories else None
+        matching_memories = [
+            item
+            for item in memories
+            if item.get("outcome_status") == "SUCCESS"
+            and self._context_matches(item, disruption_context)
+        ]
         frozen_flights = {
             str(flight["id"])
             for flight in flights
             if flight["kind"] == "OUTBOUND"
             and clock_minute <= int(flight["scheduled_minute"]) <= clock_minute + self.execution_freeze
         }
-        valid_target_ids = {
-            str(item["id"]) for item in [*flights, *resources]
+        constrained_runways = {
+            str(event["resource_id"])
+            for event in active_events
+            if event.get("resource_id")
+            and (
+                "RUNWAY" in str(event.get("type", ""))
+                or str(event.get("type", ""))
+                in {"LOW_VISIBILITY_SNOW", "WEATHER_UPDATE", "WEATHER", "WIND"}
+            )
         }
+        flow_signal = sum(
+            max(
+                abs(int(event.get("capacity_delta", 0))),
+                int(event.get("delay_minutes", 0)),
+            )
+            for event in active_events
+            if str(event.get("resource_id", "")) in constrained_runways
+        )
         candidates: list[dict[str, Any]] = []
-        for strategy, reduction, burden in definitions:
+        context_event_class = str(disruption_context.get("event_class", ""))
+        preferred_strategy = {
+            "TURNAROUND": "TURNAROUND_RECOVERY",
+            "WEATHER": "FLOW_BALANCE",
+            "RUNWAY": "FLOW_BALANCE",
+        }.get(context_event_class)
+        for strategy, action_types in definitions:
+            candidate_actions = [
+                deepcopy(action) for action in actions if action["type"] in action_types
+            ]
+            if strategy == "FLOW_BALANCE":
+                reduction = min(active_delay, max(self.minimum_benefit, round(flow_signal * 0.65)))
+                burden = 1 + 2 * len(constrained_runways)
+                benefit_components = {
+                    "active_delay_minutes": active_delay,
+                    "capacity_signal_minutes": flow_signal,
+                    "constrained_runways": len(constrained_runways),
+                }
+                burden_components = {"sequence_change": 1, "runway_constraints": 2 * len(constrained_runways)}
+            elif strategy == "GATE_SWAP":
+                gate_action = next(action for action in candidate_actions if action["type"] == "REASSIGN_GATE")
+                gate_rows = self.backend.query(
+                    "MATCH (:Flight {id: $flight})-[:COMPATIBLE_WITH]->(g:Gate) "
+                    "WHERE g.status IN ['OPEN','AVAILABLE'] RETURN count(g)",
+                    {"flight": gate_action["affected_flight_id"]},
+                ).result_set
+                compatible_gates = int(gate_rows[0][0]) if gate_rows else 0
+                reduction = min(active_delay, max(self.minimum_benefit, 4 + 2 * compatible_gates))
+                burden = 2
+                benefit_components = {
+                    "active_delay_minutes": active_delay,
+                    "compatible_open_gates": compatible_gates,
+                }
+                burden_components = {"gate_coordination": 2}
+            else:
+                turn_action = next(action for action in candidate_actions if action["type"] == "RESEQUENCE_TASKS")
+                turn_rows = self.backend.query(
+                    "MATCH (t:Turnaround {id: $id}) RETURN "
+                    "t.baseline_critical_path_minutes, t.current_critical_path_minutes",
+                    {"id": turn_action["target_id"]},
+                ).result_set
+                baseline = int(turn_rows[0][0] or 0) if turn_rows else 0
+                current = int(turn_rows[0][1] or baseline) if turn_rows else baseline
+                excess = max(0, current - baseline)
+                reduction = min(active_delay, max(self.minimum_benefit, excess))
+                burden = 4
+                benefit_components = {
+                    "active_delay_minutes": active_delay,
+                    "critical_path_before": current,
+                    "critical_path_baseline": baseline,
+                    "recoverable_excess_minutes": excess,
+                }
+                burden_components = {"task_resequence": 3, "ramp_coordination": 1}
             projected = max(0, active_delay - reduction)
-            base_score = projected + burden
+            context_penalty = (
+                0
+                if not preferred_strategy or strategy == preferred_strategy
+                else 12
+            )
+            base_cost_score = projected + burden + context_penalty
             memory_adjustment = 0
             memory_ids: list[str] = []
-            if latest and latest.get("strategy") == strategy and latest.get("outcome_status") == "SUCCESS":
-                memory_adjustment = -5
-                memory_ids.append(str(latest["id"]))
-            focus_type = {
-                "FLOW_BALANCE": "RESEQUENCE_DEPARTURE",
-                "GATE_SWAP": "REASSIGN_GATE",
-                "TURNAROUND_RECOVERY": "PROTECT_ROTATION",
-            }[strategy]
-            candidate_actions = deepcopy(actions)
-            candidate_actions.sort(key=lambda item: (item["type"] != focus_type, item["type"]))
+            related = next(
+                (item for item in matching_memories if item.get("strategy") == strategy),
+                None,
+            )
+            if related:
+                memory_adjustment = -2
+                memory_ids.append(str(related["id"]))
             for priority, action in enumerate(candidate_actions, start=1):
                 action["priority"] = priority
-                action["role"] = "PRIMARY" if action["type"] == focus_type else "SUPPORTING"
+                action["role"] = "PRIMARY" if priority == 1 else "SUPPORTING"
             policy_complete = all(action["authorized"] for action in candidate_actions)
             knowledge_current = all(
                 action["knowledge_current"] for action in candidate_actions
@@ -1095,16 +1959,18 @@ class GroundGraphEngine:
             freeze_clear = not any(
                 str(action.get("target_id")) in frozen_flights for action in candidate_actions
             )
-            targets_exist = all(
-                str(action.get("target_id", "")) in valid_target_ids
-                for action in candidate_actions
+            graph_preconditions = [
+                self._action_graph_precondition(action) for action in candidate_actions
+            ]
+            targets_exist = bool(candidate_actions) and all(
+                item[0] for item in graph_preconditions
             )
             benefit_clear = min(active_delay, reduction) >= self.minimum_benefit
             safety_checks = [
                 {"id": "CURRENT_GRAPH_STATE", "passed": True, "detail": "All specialist runs and the plan use the same graph state version."},
                 {"id": "CURRENT_POLICY_AUTHORITY", "passed": policy_complete, "detail": "Every action is linked to a current versioned policy."},
                 {"id": "CURRENT_KNOWLEDGE", "passed": knowledge_current, "detail": "Every action is backed by knowledge marked CURRENT_FOR_REPLAY."},
-                {"id": "TARGETS_EXIST", "passed": targets_exist, "detail": "Every action targets a node in the current FalkorDB graph."},
+                {"id": "TARGETS_EXIST", "passed": targets_exist, "detail": "Every action target and required relationship exists in FalkorDB.", "graph_preconditions": [{"passed": item[0], "detail": item[1], "evidence_ids": item[2]} for item in graph_preconditions]},
                 {"id": "EXECUTION_FREEZE", "passed": freeze_clear, "detail": f"No action targets outbound flights inside the {self.execution_freeze}-minute execution freeze.", "protected_flight_ids": sorted(frozen_flights)},
                 {"id": "MINIMUM_BENEFIT", "passed": benefit_clear, "detail": f"Projected recovery must be at least {self.minimum_benefit} minutes."},
                 {"id": "CHURN_GUARD", "passed": not churn_blocked, "detail": "A new plan is blocked for ten replay minutes after execution unless a high-risk material event arrives."},
@@ -1113,15 +1979,40 @@ class GroundGraphEngine:
             candidates.append(
                 {
                     "id": f"CAND-{cycle}-{strategy}", "strategy": strategy,
-                    "base_score": base_score, "memory_adjustment": memory_adjustment,
-                    "score": base_score + memory_adjustment, "projected_delay": projected,
+                    "base_cost_score": base_cost_score,
+                    "memory_adjustment": memory_adjustment,
+                    "cost_score": base_cost_score + memory_adjustment,
+                    "projected_delay": projected,
                     "recovered_minutes": min(active_delay, reduction), "eligible": eligible,
                     "actions": candidate_actions, "memory_ids": memory_ids,
                     "safety_checks": safety_checks,
+                    "benefit_components": benefit_components,
+                    "burden_minutes": burden,
+                    "burden_components": burden_components,
+                    "context_event_class": context_event_class,
+                    "context_preferred_strategy": preferred_strategy,
+                    "context_penalty": context_penalty,
                 }
             )
-        base_safe = sorted((item for item in candidates if item["eligible"]), key=lambda item: (item["base_score"], item["id"]))
-        ranked = sorted((item for item in candidates if item["eligible"]), key=lambda item: (item["score"], item["id"]))
+        safe = [item for item in candidates if item["eligible"]]
+        for item in safe:
+            item["dominated"] = any(
+                other["recovered_minutes"] >= item["recovered_minutes"]
+                and other["burden_minutes"] <= item["burden_minutes"]
+                and int(other.get("context_penalty", 0))
+                <= int(item.get("context_penalty", 0))
+                and (
+                    other["recovered_minutes"] > item["recovered_minutes"]
+                    or other["burden_minutes"] < item["burden_minutes"]
+                    or int(other.get("context_penalty", 0))
+                    < int(item.get("context_penalty", 0))
+                )
+                for other in safe
+                if other["id"] != item["id"]
+            )
+        model_safe = [item for item in safe if not item.get("dominated")]
+        base_safe = sorted(model_safe, key=lambda item: (item["base_cost_score"], item["id"]))
+        ranked = sorted(model_safe, key=lambda item: (item["cost_score"], item["id"]))
         for rank, item in enumerate(ranked, start=1):
             item["rank"] = rank
         base_winner = base_safe[0]["id"] if base_safe else None
@@ -1166,6 +2057,11 @@ class GroundGraphEngine:
             "memory_adjusted_candidate_ids": [
                 item["id"] for item in adjusted_candidates
             ],
+            "context_signature": disruption_context.get("signature"),
+            "context_event_class": disruption_context.get("event_class"),
+            "screened_out_dominated_ids": [
+                item["id"] for item in safe if item.get("dominated")
+            ],
             "ranking_summary": ranking_summary,
             "summary": ranking_summary,
         }
@@ -1178,14 +2074,49 @@ class GroundGraphEngine:
     ) -> tuple[str | None, str, str]:
         fallback = candidates[0]["id"] if candidates else None
         if not self.enable_llm or not candidates:
-            return fallback, "deterministic_safe_planner", "Local model disabled; used the highest-ranked safe candidate."
+            return fallback, "deterministic_safe_planner", "Local model disabled; used the lowest-cost candidate from the context-bounded safe shortlist."
         prompt = {
             "role": "airport recovery coordinator",
-            "instruction": "Select exactly one candidate_id. Return JSON with candidate_id and summary. Do not invent IDs.",
-            "safe_candidates": [{"candidate_id": item["id"], "strategy": item["strategy"], "score": item["score"], "projected_delay": item["projected_delay"]} for item in candidates],
-            "specialist_handoffs": [{"from": item["from_agent"], "summary": item["summary"]} for item in handoffs],
+            "instruction": (
+                "Select exactly one candidate_id from the context-bounded safe shortlist. "
+                "cost_score is a cost and LOWER IS BETTER. You may choose a higher-cost "
+                "candidate only for its graph-backed recovered-minutes versus burden tradeoff. "
+                "Return JSON with candidate_id and rationale. Do not invent IDs or actions."
+            ),
+            "model_candidate_shortlist": [
+                {
+                    "candidate_id": item["id"],
+                    "strategy": item["strategy"],
+                    "cost_score": item.get("cost_score", item.get("score")),
+                    "projected_delay": item["projected_delay"],
+                    "recovered_minutes": item.get("recovered_minutes", 0),
+                    "operational_burden_minutes": item.get("burden_minutes", 0),
+                    "context_penalty": item.get("context_penalty", 0),
+                    "context_event_class": item.get("context_event_class"),
+                    "benefit_components": item.get("benefit_components", {}),
+                    "burden_components": item.get("burden_components", {}),
+                    "actions": [
+                        {
+                            "type": action.get("type"),
+                            "target_id": action.get("target_id"),
+                            "affected_flight_id": action.get("affected_flight_id"),
+                        }
+                        for action in item.get("actions", [])
+                    ],
+                }
+                for item in candidates
+            ],
+            "specialist_handoffs": [
+                {
+                    "from": item["from_agent"],
+                    "query": item.get("query_name"),
+                    "summary": item["summary"],
+                    "evidence_ids": item.get("evidence_ids", []),
+                }
+                for item in handoffs
+            ],
         }
-        body = _json({"model": self.model, "stream": False, "format": "json", "options": {"temperature": 0, "seed": 7}, "messages": [{"role": "system", "content": "You select only from a server-validated safe set. Never execute actions."}, {"role": "user", "content": _json(prompt)}]}).encode("utf-8")
+        body = _json({"model": self.model, "stream": False, "format": "json", "options": {"temperature": 0, "seed": 7}, "messages": [{"role": "system", "content": "You select only from a server-validated, context-bounded safe shortlist. Never execute actions."}, {"role": "user", "content": _json(prompt)}]}).encode("utf-8")
         request = urllib.request.Request(self.ollama_url + "/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=self.ollama_timeout) as response:
@@ -1196,7 +2127,13 @@ class GroundGraphEngine:
             safe_ids = {item["id"] for item in candidates}
             if candidate_id not in safe_ids:
                 raise ValueError("model selected an unknown candidate")
-            summary = str(choice.get("summary", "Local model selected a validated candidate."))[:500]
+            selected = next(item for item in candidates if item["id"] == candidate_id)
+            summary = (
+                f"Qwen selected {candidate_id} from the context-bounded safe shortlist: "
+                f"cost {selected.get('cost_score', selected.get('score'))}, "
+                f"{selected.get('recovered_minutes', 0)} projected recovery minutes, "
+                f"{selected.get('burden_minutes', 0)} modeled coordination minutes."
+            )
             return candidate_id, "local_model", summary
         except Exception as exc:
             return fallback, "deterministic_fallback", f"Local model unavailable or invalid ({type(exc).__name__}); used the safe deterministic ranking."
@@ -1224,14 +2161,20 @@ class GroundGraphEngine:
         active_events = [event for event in events if event["status"] == "ACTIVE"]
         policies = self._policies()
         memories = self._memories()
+        disruption_context = self._disruption_context(
+            active_events, flights, policies
+        )
+        decision_token = str(time.time_ns())
         findings, handoffs = self._record_specialists(
             cycle=cycle,
+            decision_token=decision_token,
             state_version=state_version,
             flights=flights,
             events=events,
             resources=resources,
             policies=policies,
             memories=memories,
+            disruption_context=disruption_context,
         )
         self.backend.query("MATCH (a:Agent {id: 'AGENT-COORD'}) SET a.status = 'COORDINATING', a.current_task = 'Reading specialist handoffs', a.last_cycle = $cycle", {"cycle": cycle})
         policy_index = self._policy_index(policies)
@@ -1243,17 +2186,37 @@ class GroundGraphEngine:
             and state["clock_minute"] - last_applied < 10
             and not high_risk_event
         )
-        actions = self._candidate_actions(cycle=cycle, flights=flights, resources=resources, policy_index=policy_index)
+        actions = self._candidate_actions(
+            cycle=cycle,
+            decision_token=decision_token,
+            flights=flights,
+            resources=resources,
+            active_events=active_events,
+            policy_index=policy_index,
+        )
         ranked, influence = self._rank_candidates(
             cycle=cycle,
             active_delay=active_delay,
             actions=actions,
             memories=memories,
+            active_events=active_events,
+            disruption_context=disruption_context,
             clock_minute=state["clock_minute"],
             flights=flights,
             resources=resources,
             churn_blocked=churn_blocked,
         )
+        model_cost_window = 4 if disruption_context.get("event_class") == "TURNAROUND" else 8
+        best_cost = int(ranked[0]["cost_score"]) if ranked else 0
+        model_candidates = [
+            item
+            for item in ranked
+            if int(item["cost_score"]) <= best_cost + model_cost_window
+        ]
+        influence["model_eligible_candidate_ids"] = [
+            item["id"] for item in model_candidates
+        ]
+        influence["model_cost_window"] = model_cost_window
         pending_unchanged = bool(
             existing_plan
             and existing_plan.get("status") == "PROPOSED"
@@ -1263,10 +2226,10 @@ class GroundGraphEngine:
         if no_action:
             selected_id, decision_source, model_summary = None, "guardrail", "No model call was needed for this NO_CHANGE cycle."
         else:
-            selected_id, decision_source, model_summary = self._local_model_choice(ranked, handoffs)
+            selected_id, decision_source, model_summary = self._local_model_choice(model_candidates, handoffs)
         selected = next((item for item in ranked if item["id"] == selected_id), None)
         now = _utc_now()
-        episode_id = f"EPISODE-{cycle}-{int(time.time() * 1000)}"
+        episode_id = f"EPISODE-{cycle}-{decision_token}"
         status = "NO_ACTION_REQUIRED" if no_action else "PLAN_PROPOSED" if selected else "ESCALATED"
         summary = (
             "Specialists recorded NO_CHANGE because the current safe proposal is still valid and awaits execution."
@@ -1279,15 +2242,61 @@ class GroundGraphEngine:
             if selected
             else "No candidate has complete current policy and knowledge authorization."
         )
-        self._create_node("DecisionEpisode", {"id": episode_id, "cycle": cycle, "trigger": trigger, "status": status, "summary": summary, "based_on_version": state_version, "created_at": now, "disruption_signature": f"{state['airport']}:IRROPS"})
-        coord_run_id = f"RUN-{cycle}-COORD"
+        self._create_node("DecisionEpisode", {"id": episode_id, "cycle": cycle, "trigger": trigger, "status": status, "summary": summary, "based_on_version": state_version, "created_at": now, "disruption_signature": disruption_context["signature"], "event_class": disruption_context["event_class"], "context_json": disruption_context})
+        coord_run_id = f"RUN-{cycle}-{decision_token}-COORD"
         self._create_node("AgentRun", {"id": coord_run_id, "agent_id": "AGENT-COORD", "cycle": cycle, "status": "COMPLETED", "based_on_version": state_version, "decision_source": decision_source, "started_at": now, "ended_at": _utc_now(), "created_at": now})
         self._create_edge("AGENT-COORD", "STARTED", coord_run_id)
         self._create_edge(episode_id, "ANALYZED", self.scenario_id)
         self._create_edge(episode_id, "USED_RUN", coord_run_id)
         for handoff in handoffs:
-            self.backend.query("MATCH (h:Handoff {id: $id}) SET h.status = 'CONSUMED'", {"id": handoff["id"]})
+            self.backend.query("MATCH (h:Handoff {id: $id}) SET h.status = 'CONSUMED', h.consumed_at = $at", {"id": handoff["id"], "at": _utc_now()})
             self._create_edge(episode_id, "CONSUMED_HANDOFF", handoff["id"])
+
+        self._record_tool_call(
+            episode_id=episode_id,
+            coordinator_run_id=coord_run_id,
+            cycle=cycle,
+            sequence=1,
+            name="inspect_disruption",
+            arguments={"state_version": state_version, "status": "ACTIVE"},
+            evidence_ids=disruption_context["event_ids"],
+            result_summary=f"Read {len(active_events)} active event(s) from FalkorDB.",
+        )
+        self._record_tool_call(
+            episode_id=episode_id,
+            coordinator_run_id=coord_run_id,
+            cycle=cycle,
+            sequence=2,
+            name="get_current_policy",
+            arguments={"state_version": state_version},
+            evidence_ids=disruption_context["policy_ids"],
+            result_summary=f"Read {len(policies)} current policy version(s).",
+        )
+        self._record_tool_call(
+            episode_id=episode_id,
+            coordinator_run_id=coord_run_id,
+            cycle=cycle,
+            sequence=3,
+            name="recall_episode",
+            arguments={"context_signature": disruption_context["signature"], "event_class": disruption_context["event_class"]},
+            evidence_ids=influence.get("memory_ids", []),
+            result_summary=f"Found {len(influence.get('memory_ids', []))} context-matched successful episode(s).",
+        )
+        self._record_tool_call(
+            episode_id=episode_id,
+            coordinator_run_id=coord_run_id,
+            cycle=cycle,
+            sequence=4,
+            name="validate_candidate",
+            arguments={"candidate_ids": [item["id"] for item in ranked], "state_version": state_version},
+            evidence_ids=[
+                check["id"]
+                for item in ranked
+                for check in item.get("safety_checks", [])
+                if check.get("passed")
+            ],
+            result_summary=f"Produced {len(ranked)} non-dominated, graph-valid candidate(s).",
+        )
 
         if no_action:
             self.backend.query("MATCH (s:Scenario {id: $scenario}) SET s.status = 'MONITORING'", {"scenario": self.scenario_id})
@@ -1301,7 +2310,7 @@ class GroundGraphEngine:
 
         self.backend.query("MATCH (p:Plan) WHERE p.is_current = true SET p.is_current = false")
         self.backend.query("MATCH (p:Plan) WHERE p.status = 'PROPOSED' AND p.is_current = false SET p.status = 'SUPERSEDED'")
-        plan_id = f"PLAN-{cycle}-{selected['strategy']}"
+        plan_id = f"PLAN-{cycle}-{decision_token}-{selected['strategy']}"
         policy_evidence = []
         for action in selected["actions"]:
             policy = policy_index.get(action["type"])
@@ -1323,9 +2332,6 @@ class GroundGraphEngine:
                 "status": policy.get("status") if policy else None,
                 "freshness_status": policy.get("freshness_status") if policy else None,
             })
-        causal = self._causal_path(
-            active_events, flights, resources, selected["actions"], policy_evidence
-        )
         auto_policy = policy_index.get("APPLY_VALIDATED_PLAN")
         auto_knowledge_current = bool(
             auto_policy
@@ -1335,13 +2341,46 @@ class GroundGraphEngine:
         auto_authorized = bool(self.auto_apply and auto_knowledge_current)
         plan = {
             "id": plan_id, "candidate_id": selected["id"], "status": "PROPOSED",
+            "episode_id": episode_id,
             "strategy": selected["strategy"], "summary": summary,
             "based_on_version": state_version, "cycle": cycle, "selected_by": decision_source,
-            "score": selected["score"], "base_score": selected["base_score"],
+            "cost_score": selected["cost_score"],
+            "base_cost_score": selected["base_cost_score"],
             "memory_adjustment": selected["memory_adjustment"],
             "baseline_delay": active_delay,
             "projected_delay": selected["projected_delay"], "recovered_minutes": selected["recovered_minutes"],
             "actions": selected["actions"],
+            "candidate_tradeoff": {
+                "benefit_components": selected.get("benefit_components", {}),
+                "burden_minutes": selected.get("burden_minutes", 0),
+                "burden_components": selected.get("burden_components", {}),
+                "context_penalty": selected.get("context_penalty", 0),
+                "context_event_class": selected.get("context_event_class"),
+                "cost_direction": "LOWER_IS_BETTER",
+            },
+            "safe_candidate_set": [
+                {
+                    "id": item["id"],
+                    "strategy": item["strategy"],
+                    "cost_score": item["cost_score"],
+                    "projected_delay": item["projected_delay"],
+                    "recovered_minutes": item["recovered_minutes"],
+                    "burden_minutes": item["burden_minutes"],
+                    "context_penalty": item.get("context_penalty", 0),
+                    "action_types": [action["type"] for action in item["actions"]],
+                }
+                for item in ranked
+            ],
+            "model_candidate_set": [
+                {
+                    "id": item["id"],
+                    "strategy": item["strategy"],
+                    "cost_score": item["cost_score"],
+                    "context_penalty": item.get("context_penalty", 0),
+                }
+                for item in model_candidates
+            ],
+            "disruption_context": disruption_context,
             "policy_authorization": {
                 "complete": all(
                     item["authorized"] and item["knowledge_current"]
@@ -1368,22 +2407,44 @@ class GroundGraphEngine:
                 "scope": "Modeled replay only; never connected to live airport systems.",
             },
             "safety_validation": {"passed": all(check["passed"] for check in selected["safety_checks"]), "checks": selected["safety_checks"], "validator": "deterministic_safety_validator"},
-            "created_at": now, "causal_path": causal,
+            "created_at": now,
+            "causal_context": {
+                "event_ids": disruption_context["event_ids"],
+                "action_ids": [action["id"] for action in selected["actions"]],
+            },
+            "causal_path": {"summary": "Building graph evidence.", "nodes": [], "edges": []},
         }
+        self._create_node("Plan", {"id": plan_id, "cycle": cycle, "strategy": selected["strategy"], "status": "PROPOSED", "based_on_version": state_version, "cost_score": selected["cost_score"], "projected_delay": selected["projected_delay"], "is_current": True, "payload_json": _json(plan), "context_json": disruption_context, "created_at": now})
+        self._create_edge(episode_id, "SELECTED", plan_id)
+        self._persist_action_graph(plan_id, selected["actions"], policy_index, now)
+        plan["causal_path"] = self._graph_causal_path(
+            disruption_context["event_ids"],
+            [action["id"] for action in selected["actions"]],
+        )
         plan = _normalize_plan_payload(plan)
         influence = plan["memory_influence"]
-        self._create_node("Plan", {"id": plan_id, "cycle": cycle, "strategy": selected["strategy"], "status": "PROPOSED", "based_on_version": state_version, "score": selected["score"], "projected_delay": selected["projected_delay"], "is_current": True, "payload_json": _json(plan), "created_at": now})
-        self._create_edge(episode_id, "SELECTED", plan_id)
-        for action in selected["actions"]:
-            self._create_node("Action", {**action, "plan_id": plan_id, "status": "VALIDATED", "created_at": now})
-            self._create_edge(plan_id, "PROPOSES", action["id"])
-            if action.get("target_id"):
-                self._create_edge(action["id"], "AFFECTS", str(action["target_id"]))
-            if action.get("policy_id"):
-                self._create_edge(action["id"], "AUTHORIZED_BY", str(action["policy_id"]))
-                aligned = policy_index.get(action["type"], {}).get("procedure_id")
-                if aligned:
-                    self._create_edge(action["id"], "SUPPORTED_BY", str(aligned))
+        self.backend.query(
+            "MATCH (p:Plan {id: $id}) SET p.payload_json = $payload",
+            {"id": plan_id, "payload": _json(plan)},
+        )
+        model_run_id = f"MODEL-{cycle}-{decision_token}"
+        self._create_node(
+            "ModelRun",
+            {
+                "id": model_run_id,
+                "provider": "ollama" if decision_source == "local_model" else "deterministic",
+                "model": self.model if decision_source == "local_model" else "safe-planner",
+                "selected_candidate_id": selected["id"],
+                "allowlisted_candidate_ids": [item["id"] for item in model_candidates],
+                "cost_direction": "LOWER_IS_BETTER",
+                "decision_source": decision_source,
+                "summary": summary,
+                "created_at": now,
+            },
+        )
+        self._create_edge(coord_run_id, "RAN_MODEL", model_run_id)
+        self._create_edge(episode_id, "USED_MODEL", model_run_id)
+        self._create_edge(model_run_id, "SELECTED", plan_id)
         for memory_id in influence.get("memory_ids", []):
             self._create_edge(episode_id, "RECALLED", memory_id)
         self.backend.query("MATCH (s:Scenario {id: $scenario}), (a:Agent {id: 'AGENT-COORD'}) SET s.status = 'AWAITING_APPROVAL', a.status = 'AWAITING_APPROVAL', a.current_task = 'Safe plan ready for human review', a.last_run_id = $run", {"scenario": self.scenario_id, "run": coord_run_id})
@@ -1392,69 +2453,281 @@ class GroundGraphEngine:
             return {"episode_id": episode_id, "status": "AUTO_APPLIED", "plan": self._current_plan(), "influence": influence, "findings": findings}
         return {"episode_id": episode_id, "status": status, "plan": plan, "influence": influence, "findings": findings}
 
-    @staticmethod
-    def _causal_path(
-        active_events: list[dict[str, Any]],
-        flights: list[dict[str, Any]],
-        resources: list[dict[str, Any]],
-        actions: list[dict[str, Any]],
-        evidence: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        event = active_events[0] if active_events else None
-        flight = next((item for item in flights if event and item["id"] == event.get("flight_id")), flights[0] if flights else None)
-        nodes: list[dict[str, Any]] = []
-        edges: list[dict[str, str]] = []
-        if event:
-            nodes.append({"id": event["id"], "label": event["summary"], "type": "EVENT", "status": event["status"], "source_kind": event.get("source_kind", "MODELED")})
-        if flight:
-            nodes.append({"id": flight["id"], "label": flight["callsign"], "type": "FLIGHT", "status": flight["status"], "source_kind": flight.get("source_kind", "MIXED")})
-            if event:
-                edges.append({"source": event["id"], "target": flight["id"], "type": "AFFECTS"})
-            downstream = next(
-                (
-                    item
-                    for item in flights
-                    if item["rotation_id"] == flight["rotation_id"]
-                    and int(item["scheduled_minute"]) > int(flight["scheduled_minute"])
-                ),
-                None,
+    def _persist_action_graph(
+        self,
+        plan_id: str,
+        actions: Iterable[Mapping[str, Any]],
+        policy_index: Mapping[str, Mapping[str, Any]],
+        created_at: str,
+    ) -> None:
+        """Persist the exact relationships later returned by the evidence view."""
+
+        for action_value in actions:
+            action = dict(action_value)
+            self._create_node(
+                "Action",
+                {**action, "plan_id": plan_id, "status": "VALIDATED", "created_at": created_at},
             )
-            if downstream:
-                nodes.append({"id": downstream["id"], "label": downstream["callsign"], "type": "DOWNSTREAM_FLIGHT", "status": downstream["status"], "source_kind": downstream.get("source_kind", "MIXED")})
-                edges.append({"source": flight["id"], "target": downstream["id"], "type": "ROTATES_TO"})
-        if event and event.get("resource_id"):
-            resource = next(
-                (item for item in resources if item["id"] == event["resource_id"]),
-                None,
-            )
-            if resource:
-                nodes.append({"id": resource["id"], "label": resource["label"], "type": resource["type"], "status": resource["status"], "source_kind": resource.get("source_kind", "MODELED")})
-                edges.append({"source": event["id"], "target": resource["id"], "type": "CONSTRAINS"})
-        for action in actions:
-            nodes.append({"id": action["id"], "label": action["description"], "type": "ACTION", "status": "VALIDATED", "source_kind": "DERIVED"})
-            if flight:
-                edges.append({"source": flight["id"], "target": action["id"], "type": "RECOVERED_BY"})
+            self._create_edge(plan_id, "PROPOSES", str(action["id"]))
+            affected_flight = str(action.get("affected_flight_id", ""))
+            if affected_flight:
+                self._create_edge(affected_flight, "RECOVERED_BY", str(action["id"]))
+            action_type = str(action.get("type", ""))
             target_id = str(action.get("target_id", ""))
-            target_resource = next(
-                (item for item in resources if item["id"] == target_id), None
-            )
-            target_flight = next(
-                (item for item in flights if item["id"] == target_id), None
-            )
-            if target_resource:
-                if not any(item["id"] == target_id for item in nodes):
-                    nodes.append({"id": target_id, "label": target_resource["label"], "type": target_resource["type"], "status": target_resource["status"], "source_kind": target_resource.get("source_kind", "MODELED")})
-                edges.append({"source": action["id"], "target": target_id, "type": "USES_RESOURCE"})
-            elif target_flight:
-                if not any(item["id"] == target_id for item in nodes):
-                    nodes.append({"id": target_id, "label": target_flight["callsign"], "type": "FLIGHT", "status": target_flight["status"], "source_kind": target_flight.get("source_kind", "MIXED")})
-                edges.append({"source": action["id"], "target": target_id, "type": "AFFECTS"})
-        for item in evidence:
-            if not item.get("policy_id"):
+            if target_id:
+                relationship = {
+                    "RESEQUENCE_DEPARTURE": "USES_RESOURCE",
+                    "REASSIGN_GATE": "USES_RESOURCE",
+                    "RESEQUENCE_TASKS": "REORDERS",
+                    "PROTECT_ROTATION": "PROTECTS",
+                }.get(action_type)
+                if relationship:
+                    self._create_edge(str(action["id"]), relationship, target_id)
+            if action.get("policy_id"):
+                self._create_edge(
+                    str(action["id"]), "AUTHORIZED_BY", str(action["policy_id"])
+                )
+                aligned = policy_index.get(action_type, {}).get("procedure_id")
+                if aligned:
+                    self._create_edge(str(action["id"]), "SUPPORTED_BY", str(aligned))
+
+    @staticmethod
+    def _path_node_type(labels: Iterable[str]) -> str:
+        label_set = set(labels)
+        order = (
+            ("OperationalEvent", "EVENT"),
+            ("Flight", "FLIGHT"),
+            ("Action", "ACTION"),
+            ("Runway", "RUNWAY"),
+            ("Gate", "GATE"),
+            ("Turnaround", "TURNAROUND"),
+            ("TurnaroundTask", "TASK"),
+            ("Policy", "POLICY"),
+            ("ProcedureVersion", "PROCEDURE"),
+            ("SourceDocument", "DOCUMENT"),
+            ("Team", "TEAM"),
+            ("Role", "ROLE"),
+        )
+        return next((kind for label, kind in order if label in label_set), "EVIDENCE")
+
+    def _graph_causal_path(
+        self, event_ids: Iterable[str], action_ids: Iterable[str]
+    ) -> dict[str, Any]:
+        """Build the visible path exclusively from relationships in FalkorDB."""
+
+        event_ids = [str(item) for item in event_ids]
+        action_ids = [str(item) for item in action_ids]
+        anchors = set(event_ids + action_ids)
+        if not anchors:
+            return {
+                "summary": "No graph-backed disruption path is active.",
+                "nodes": [],
+                "edges": [],
+            }
+        allowed = [
+            "AFFECTS", "CONSTRAINS", "DELAYS", "USES", "ROTATES_TO",
+            "FEEDS", "PREPARES", "HAS_TASK", "MUST_COMPLETE_BEFORE",
+            "RECOVERED_BY", "USES_RESOURCE", "REORDERS", "PROTECTS",
+            "AUTHORIZED_BY", "SUPPORTED_BY", "ALIGNED_WITH", "IN_DOCUMENT",
+            "OWNED_BY", "RESPONSIBLE_ROLE",
+        ]
+        rows = self.backend.query(
+            "MATCH (a)-[r]->(b) WHERE type(r) IN $types "
+            "RETURN a.id, labels(a), a.callsign, a.summary, a.label, a.title, "
+            "a.name, a.status, a.source_kind, type(r), b.id, labels(b), "
+            "b.callsign, b.summary, b.label, b.title, b.name, b.status, b.source_kind",
+            {"types": allowed},
+        ).result_set
+        raw_edges: list[tuple[str, str, str]] = []
+        node_data: dict[str, dict[str, Any]] = {}
+
+        def add_node(offset: int, row: list[Any] | tuple[Any, ...]) -> None:
+            node_id = str(row[offset])
+            labels = list(row[offset + 1] or [])
+            if "Action" in labels and node_id not in action_ids:
+                return
+            if "OperationalEvent" in labels and node_id not in event_ids:
+                return
+            candidates = row[offset + 2 : offset + 7]
+            node_data[node_id] = {
+                "id": node_id,
+                "label": next((str(value) for value in candidates if value), node_id),
+                "type": self._path_node_type(labels),
+                "status": row[offset + 7],
+                "source_kind": row[offset + 8] or "DERIVED",
+            }
+
+        for row in rows:
+            source = str(row[0])
+            target = str(row[10])
+            source_labels = set(row[1] or [])
+            target_labels = set(row[11] or [])
+            if "Action" in source_labels and source not in action_ids:
                 continue
-            nodes.append({"id": item["policy_id"], "label": item.get("title") or item["policy_id"], "type": "POLICY", "status": item.get("status"), "source_kind": "MODELED"})
-            edges.append({"source": item["action_id"], "target": item["policy_id"], "type": "AUTHORIZED_BY"})
-        return {"summary": "Event → resource/flight → downstream rotation → coordinated actions → current policy evidence", "nodes": nodes, "edges": edges}
+            if "Action" in target_labels and target not in action_ids:
+                continue
+            if "OperationalEvent" in source_labels and source not in event_ids:
+                continue
+            if "OperationalEvent" in target_labels and target not in event_ids:
+                continue
+            add_node(0, row)
+            add_node(10, row)
+            raw_edges.append((source, target, str(row[9])))
+
+        selected_edges: set[tuple[str, str, str]] = set()
+        event_relationships = {"AFFECTS", "CONSTRAINS", "DELAYS"}
+        action_relationships = {
+            "USES_RESOURCE", "REORDERS", "PROTECTS", "AUTHORIZED_BY", "SUPPORTED_BY"
+        }
+        for edge in raw_edges:
+            source, target, relationship = edge
+            if source in event_ids and relationship in event_relationships:
+                selected_edges.add(edge)
+            elif source in action_ids and relationship in action_relationships:
+                selected_edges.add(edge)
+            elif target in action_ids and relationship == "RECOVERED_BY":
+                selected_edges.add(edge)
+
+        relevant_flights = {
+            node_id
+            for edge in selected_edges
+            for node_id in edge[:2]
+            if node_data.get(node_id, {}).get("type") == "FLIGHT"
+        }
+        for edge in raw_edges:
+            source, target, relationship = edge
+            if relationship == "ROTATES_TO" and (
+                source in relevant_flights or target in relevant_flights
+            ):
+                selected_edges.add(edge)
+                relevant_flights.update((source, target))
+
+        relevant_resources = {
+            target
+            for source, target, relationship in selected_edges
+            if relationship in {"CONSTRAINS", "USES_RESOURCE"}
+        }
+        for edge in raw_edges:
+            source, target, relationship = edge
+            if (
+                relationship == "USES"
+                and source in relevant_flights
+                and target in relevant_resources
+            ):
+                selected_edges.add(edge)
+
+        relevant_turnarounds = {
+            target
+            for source, target, relationship in selected_edges
+            if relationship == "REORDERS"
+        }
+        relevant_tasks = {
+            target
+            for source, target, relationship in selected_edges
+            if relationship == "DELAYS"
+        }
+        for edge in raw_edges:
+            source, target, relationship = edge
+            if relationship == "MUST_COMPLETE_BEFORE" and (
+                source in relevant_tasks or target in relevant_tasks
+            ):
+                selected_edges.add(edge)
+                relevant_tasks.update((source, target))
+        for edge in raw_edges:
+            source, target, relationship = edge
+            if (
+                relationship == "HAS_TASK"
+                and source in relevant_turnarounds
+                and target in relevant_tasks
+            ) or (
+                relationship in {"FEEDS", "PREPARES"}
+                and (
+                    source in relevant_flights
+                    or target in relevant_flights
+                    or source in relevant_turnarounds
+                    or target in relevant_turnarounds
+                )
+                and (source in relevant_turnarounds or target in relevant_turnarounds)
+            ):
+                selected_edges.add(edge)
+
+        relevant_policies = {
+            target
+            for source, target, relationship in selected_edges
+            if relationship == "AUTHORIZED_BY"
+        }
+        relevant_procedures = {
+            target
+            for source, target, relationship in selected_edges
+            if relationship == "SUPPORTED_BY"
+        }
+        for edge in raw_edges:
+            source, target, relationship = edge
+            if (
+                source in relevant_policies
+                and relationship == "ALIGNED_WITH"
+                and target in relevant_procedures
+            ):
+                selected_edges.add(edge)
+        for edge in raw_edges:
+            source, _target, relationship = edge
+            if source in relevant_procedures and relationship in {
+                "IN_DOCUMENT", "OWNED_BY", "RESPONSIBLE_ROLE"
+            }:
+                selected_edges.add(edge)
+
+        reached = set(anchors)
+        for source, target, _relationship in selected_edges:
+            reached.update((source, target))
+        edges = [
+            {"source": source, "target": target, "type": relationship}
+            for source, target, relationship in sorted(selected_edges)
+            if source in reached and target in reached
+        ]
+        nodes = [node_data[node_id] for node_id in sorted(reached) if node_id in node_data]
+        return {
+            "summary": (
+                "Every visible hop was read from FalkorDB: disruption → operational "
+                "dependencies → selected actions → current authority."
+            ),
+            "nodes": nodes,
+            "edges": edges,
+            "event_ids": event_ids,
+            "action_ids": action_ids,
+        }
+
+    def _record_tool_call(
+        self,
+        *,
+        episode_id: str,
+        coordinator_run_id: str,
+        cycle: int,
+        sequence: int,
+        name: str,
+        arguments: Mapping[str, Any],
+        evidence_ids: Iterable[str],
+        result_summary: str,
+    ) -> str:
+        tool_id = f"TOOL-{cycle}-{sequence}-{time.time_ns()}"
+        now = _utc_now()
+        self._create_node(
+            "ToolCall",
+            {
+                "id": tool_id,
+                "name": name,
+                "transport": "MCP_COMPATIBLE_GRAPH_TOOL",
+                "arguments_json": dict(arguments),
+                "evidence_ids": list(evidence_ids),
+                "result_summary": result_summary,
+                "status": "COMPLETED",
+                "sequence": sequence,
+                "cycle": cycle,
+                "created_at": now,
+            },
+        )
+        self._create_edge(coordinator_run_id, "INVOKED", tool_id)
+        self._create_edge(episode_id, "USED_TOOL", tool_id)
+        return tool_id
 
     def analyze(self, trigger: str = "MANUAL_REPLAN") -> dict[str, Any]:
         with self._lock:
@@ -1551,6 +2824,12 @@ class GroundGraphEngine:
                 if not rows or int(rows[0][0]) < 1:
                     targets_exist = False
                     break
+            graph_preconditions = [
+                self._action_graph_precondition(action) for action in actions
+            ]
+            targets_exist = targets_exist and bool(graph_preconditions) and all(
+                item[0] for item in graph_preconditions
+            )
 
             checks = [
                 {
@@ -1571,7 +2850,15 @@ class GroundGraphEngine:
                 {
                     "id": "TARGETS_EXIST",
                     "passed": targets_exist,
-                    "detail": "Every proposed action still targets a node in the current FalkorDB graph.",
+                    "detail": "Every proposed action still has its target and required FalkorDB relationship.",
+                    "graph_preconditions": [
+                        {
+                            "passed": item[0],
+                            "detail": item[1],
+                            "evidence_ids": item[2],
+                        }
+                        for item in graph_preconditions
+                    ],
                 },
                 {
                     "id": "EXECUTION_FREEZE",
@@ -1661,6 +2948,20 @@ class GroundGraphEngine:
                                     "delay": event["delay_minutes"],
                                 },
                             )
+                        if event.get("type") == "BAG_RECONCILIATION_DELAY":
+                            self.backend.query(
+                                "MATCH (:OperationalEvent {id: $event})-[:DELAYS]->"
+                                "(task:TurnaroundTask)<-[:HAS_TASK]-(turn:Turnaround) "
+                                "SET task.duration_minutes = task.duration_minutes + $delay, "
+                                "task.status = 'DELAYED', "
+                                "turn.current_critical_path_minutes = "
+                                "turn.current_critical_path_minutes + $delay, "
+                                "turn.status = 'DELAYED'",
+                                {
+                                    "event": event["id"],
+                                    "delay": event["delay_minutes"],
+                                },
+                            )
                     self.backend.query(
                         "MATCH (s:Scenario {id: $id}) "
                         "SET s.state_version = s.state_version + 1, "
@@ -1726,6 +3027,42 @@ class GroundGraphEngine:
             self.backend.query("MATCH (:Plan {id: $plan})-[:PROPOSES]->(a:Action) SET a.status = 'EXECUTED'", {"plan": plan_id})
             self.backend.query("MATCH (e:OperationalEvent) WHERE e.status = 'ACTIVE' SET e.status = 'MITIGATED'")
             reduction = int(current.get("recovered_minutes", 0))
+            for action in current.get("actions", []):
+                action_type = str(action.get("type", ""))
+                target_id = str(action.get("target_id", ""))
+                affected_flight_id = str(action.get("affected_flight_id", ""))
+                if action_type == "REASSIGN_GATE":
+                    self.backend.query(
+                        "MATCH (f:Flight {id: $flight}), (g:Gate {id: $gate}) "
+                        "SET f.gate = g.id, g.status = 'RESERVED'",
+                        {"flight": affected_flight_id, "gate": target_id},
+                    )
+                elif action_type == "RESEQUENCE_DEPARTURE":
+                    self.backend.query(
+                        "MATCH (f:Flight {id: $flight}) SET f.runway = $runway, "
+                        "f.sequence_status = 'RESEQUENCED'",
+                        {"flight": affected_flight_id, "runway": target_id},
+                    )
+                elif action_type == "RESEQUENCE_TASKS":
+                    self.backend.query(
+                        "MATCH (t:Turnaround {id: $turn})-[:HAS_TASK]->"
+                        "(task:TurnaroundTask) SET "
+                        "t.current_critical_path_minutes = CASE "
+                        "WHEN t.current_critical_path_minutes - $recovered < "
+                        "t.baseline_critical_path_minutes THEN t.baseline_critical_path_minutes "
+                        "ELSE t.current_critical_path_minutes - $recovered END, "
+                        "t.status = 'RECOVERING', "
+                        "task.duration_minutes = CASE WHEN task.status = 'DELAYED' "
+                        "THEN task.baseline_duration_minutes ELSE task.duration_minutes END, "
+                        "task.status = CASE WHEN task.status = 'DELAYED' "
+                        "THEN 'RESEQUENCED' ELSE task.status END",
+                        {"turn": target_id, "recovered": reduction},
+                    )
+                elif action_type == "PROTECT_ROTATION":
+                    self.backend.query(
+                        "MATCH (f:Flight {id: $flight}) SET f.protection_status = 'PROTECTED'",
+                        {"flight": target_id},
+                    )
             affected = self.backend.query("MATCH (f:Flight) WHERE f.delay_minutes > 0 RETURN f.id, f.delay_minutes ORDER BY f.delay_minutes DESC").result_set
             remaining = reduction
             for flight_id, delay in affected:
@@ -1747,8 +3084,9 @@ class GroundGraphEngine:
             self.backend.query("MATCH (s:Scenario {id: $id}) SET s.state_version = $version, s.status = 'MONITORING'", {"id": self.scenario_id, "version": new_version})
             outcome_id = f"OUTCOME-{current['cycle']}-{int(time.time() * 1000)}"
             memory_id = f"MEMORY-{current['cycle']}-{int(time.time() * 1000)}"
-            self._create_node("Outcome", {"id": outcome_id, "plan_id": plan_id, "status": "SUCCESS", "projected_delay": current["projected_delay"], "benefit_minutes": current["recovered_minutes"], "created_at": now, "source_kind": "MODELED"})
-            self._create_node("Memory", {"id": memory_id, "strategy": current["strategy"], "disruption_signature": f"{state['airport']}:IRROPS", "benefit_minutes": current["recovered_minutes"], "confidence": "SIMULATED", "created_at": now, "source_kind": "DERIVED"})
+            context = dict(current.get("disruption_context", {}))
+            self._create_node("Outcome", {"id": outcome_id, "plan_id": plan_id, "status": "SUCCESS", "projected_delay": current["projected_delay"], "benefit_minutes": current["recovered_minutes"], "event_class": context.get("event_class"), "context_json": context, "created_at": now, "source_kind": "MODELED"})
+            self._create_node("Memory", {"id": memory_id, "strategy": current["strategy"], "disruption_signature": context.get("signature"), "event_class": context.get("event_class"), "context_json": context, "flight_ids": context.get("flight_ids", []), "rotation_ids": context.get("rotation_ids", []), "resource_ids": context.get("resource_ids", []), "policy_ids": context.get("policy_ids", []), "benefit_minutes": current["recovered_minutes"], "confidence": "SIMULATED", "created_at": now, "source_kind": "DERIVED"})
             self._create_edge(plan_id, "RESULTED_IN", outcome_id)
             self._create_edge(memory_id, "REMEMBERS", outcome_id)
             self._create_edge("AGENT-COORD", "STORED", memory_id)
@@ -1822,10 +3160,227 @@ class GroundGraphEngine:
             self._replan_locked(f"POLICY_SUPERSEDED:{policy_id}")
             return self.snapshot()
 
+    def set_autonomy(self, enabled: bool) -> dict[str, Any]:
+        """Change the server-side replay execution authority at runtime."""
+
+        with self._lock:
+            self.auto_apply = bool(enabled)
+            self.backend.query(
+                "MATCH (s:Scenario {id: $id}) SET s.auto_apply = $enabled",
+                {"id": self.scenario_id, "enabled": self.auto_apply},
+            )
+            plan = self._current_plan()
+            if plan and plan.get("status") == "PROPOSED":
+                automation = dict(plan.get("automation", {}))
+                knowledge_current = bool(automation.get("knowledge_current"))
+                automation["auto_apply_authorized"] = bool(
+                    self.auto_apply and knowledge_current
+                )
+                automation["mode"] = (
+                    "BOUNDED_AUTOPILOT"
+                    if automation["auto_apply_authorized"]
+                    else "SUPERVISED"
+                )
+                plan["automation"] = automation
+                plan["requires_human_approval"] = not automation[
+                    "auto_apply_authorized"
+                ]
+                self.backend.query(
+                    "MATCH (p:Plan {id: $id}) SET p.payload_json = $payload",
+                    {"id": plan["id"], "payload": _json(plan)},
+                )
+                if automation["auto_apply_authorized"]:
+                    validation = self.validate_candidate(
+                        str(plan.get("candidate_id", "")),
+                        int(plan.get("based_on_version", -1)),
+                    )
+                    if validation["passed"]:
+                        return self.apply(
+                            str(plan["id"]), int(plan["based_on_version"])
+                        )
+            return self.snapshot()
+
     def reset(self, *, preserve_memory: bool = True) -> dict[str, Any]:
         with self._lock:
-            retained = self._memories(limit=100) if preserve_memory else []
+            lineages = self._memory_lineages(limit=100) if preserve_memory else []
+            handoff_lineages = (
+                self._episode_handoff_lineages() if preserve_memory else []
+            )
+            coordinator_traces = (
+                self._applied_episode_coordinator_traces()
+                if preserve_memory
+                else []
+            )
+            retained = self._memories(limit=100) if preserve_memory and not lineages else []
             self._seed()
+            policy_index = self._policy_index(self._policies())
+            restored_episode_ids: set[str] = set()
+            for lineage in reversed(lineages):
+                episode = lineage["episode"]
+                plan_record = lineage["plan"]
+                outcome = lineage["outcome"]
+                memory = lineage["memory"]
+                plan_payload = dict(plan_record["payload"])
+                self._create_node(
+                    "DecisionEpisode",
+                    {
+                        **episode,
+                        "archived_replay": True,
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_node(
+                    "Plan",
+                    {
+                        "id": plan_record["id"],
+                        "cycle": plan_record["cycle"],
+                        "strategy": plan_record["strategy"],
+                        "status": "APPLIED",
+                        "based_on_version": plan_record["based_on_version"],
+                        "cost_score": plan_record["cost_score"],
+                        "projected_delay": plan_record["projected_delay"],
+                        "is_current": False,
+                        "payload_json": plan_payload,
+                        "created_at": plan_record["created_at"],
+                        "applied_at": plan_record["applied_at"],
+                        "archived_replay": True,
+                    },
+                )
+                self._create_node(
+                    "Outcome",
+                    {
+                        "id": outcome["id"], "plan_id": plan_record["id"],
+                        "status": outcome["status"],
+                        "projected_delay": outcome["projected_delay"],
+                        "benefit_minutes": outcome["benefit_minutes"],
+                        "event_class": memory["event_class"],
+                        "context_json": memory["context"],
+                        "source_kind": "MODELED", "created_at": outcome["created_at"],
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_node(
+                    "Memory",
+                    {
+                        "id": memory["id"], "strategy": memory["strategy"],
+                        "disruption_signature": memory["disruption_signature"],
+                        "event_class": memory["event_class"],
+                        "context_json": memory["context"],
+                        "flight_ids": memory["flight_ids"],
+                        "rotation_ids": memory["rotation_ids"],
+                        "resource_ids": memory["resource_ids"],
+                        "policy_ids": memory["policy_ids"],
+                        "benefit_minutes": memory["benefit_minutes"],
+                        "confidence": memory["confidence"],
+                        "created_at": memory["created_at"],
+                        "source_kind": "DERIVED",
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_edge(episode["id"], "SELECTED", plan_record["id"])
+                self._create_edge(plan_record["id"], "RESULTED_IN", outcome["id"])
+                self._create_edge(memory["id"], "REMEMBERS", outcome["id"])
+                self._create_edge("AGENT-COORD", "STORED", memory["id"])
+                restored_episode_ids.add(str(episode["id"]))
+                self._persist_action_graph(
+                    str(plan_record["id"]),
+                    plan_payload.get("actions", []),
+                    policy_index,
+                    str(plan_record["created_at"] or _utc_now()),
+                )
+            for lineage in handoff_lineages:
+                episode_id = str(lineage["episode_id"])
+                if episode_id not in restored_episode_ids:
+                    continue
+                run = lineage["run"]
+                finding = lineage["finding"]
+                handoff = lineage["handoff"]
+                self._create_node(
+                    "AgentRun",
+                    {
+                        **run,
+                        "archived_replay": True,
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_node(
+                    "Finding",
+                    {
+                        **finding,
+                        "archived_replay": True,
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_node(
+                    "Handoff",
+                    {
+                        **handoff,
+                        "archived_replay": True,
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_edge(
+                    str(handoff["from_agent"]), "STARTED", str(run["id"])
+                )
+                self._create_edge(
+                    str(run["id"]), "PRODUCED", str(finding["id"])
+                )
+                self._create_edge(
+                    str(finding["id"]), "PACKAGED_AS", str(handoff["id"])
+                )
+                self._create_edge(
+                    str(handoff["id"]),
+                    "DELIVERED_TO",
+                    str(handoff["to_agent"]),
+                )
+                self._create_edge(
+                    episode_id, "CONSUMED_HANDOFF", str(handoff["id"])
+                )
+            for trace in coordinator_traces:
+                episode_id = str(trace["episode_id"])
+                if episode_id not in restored_episode_ids:
+                    continue
+                run = dict(trace["run"])
+                run_id = str(run["id"])
+                self._create_node(
+                    "AgentRun",
+                    {
+                        **run,
+                        "archived_replay": True,
+                        "restored_after_replay_reset": True,
+                    },
+                )
+                self._create_edge("AGENT-COORD", "STARTED", run_id)
+                self._create_edge(episode_id, "USED_RUN", run_id)
+                for tool_value in trace["tools"]:
+                    tool = dict(tool_value)
+                    tool_id = str(tool["id"])
+                    self._create_node(
+                        "ToolCall",
+                        {
+                            **tool,
+                            "archived_replay": True,
+                            "restored_after_replay_reset": True,
+                        },
+                    )
+                    self._create_edge(run_id, "INVOKED", tool_id)
+                    self._create_edge(episode_id, "USED_TOOL", tool_id)
+                if trace["model"]:
+                    model = dict(trace["model"])
+                    model_id = str(model["id"])
+                    self._create_node(
+                        "ModelRun",
+                        {
+                            **model,
+                            "archived_replay": True,
+                            "restored_after_replay_reset": True,
+                        },
+                    )
+                    self._create_edge(run_id, "RAN_MODEL", model_id)
+                    self._create_edge(episode_id, "USED_MODEL", model_id)
+                    self._create_edge(
+                        model_id, "SELECTED", str(trace["plan_id"])
+                    )
             for item in reversed(retained):
                 outcome_id = str(item["outcome_id"])
                 self._create_node(
@@ -1845,6 +3400,12 @@ class GroundGraphEngine:
                         "id": item["id"],
                         "strategy": item["strategy"],
                         "disruption_signature": item["disruption_signature"],
+                        "event_class": item.get("event_class"),
+                        "context_json": item.get("context", {}),
+                        "flight_ids": item.get("flight_ids", []),
+                        "rotation_ids": item.get("rotation_ids", []),
+                        "resource_ids": item.get("resource_ids", []),
+                        "policy_ids": item.get("policy_ids", []),
                         "benefit_minutes": item["benefit_minutes"],
                         "confidence": item["confidence"],
                         "created_at": item["created_at"],
@@ -1899,7 +3460,8 @@ class GroundGraphEngine:
                     "label": _clock(state["base_clock_minute"] + state["clock_minute"]),
                     "iso": f"{state['date']}T{_clock(state['base_clock_minute'] + state['clock_minute'])}:00",
                     "speed": 1,
-                    "playing": state["clock_minute"] < state["end_minute"],
+                    "playing": False,
+                    "can_play": state["clock_minute"] < state["end_minute"],
                     "cycle": state["cycle"],
                     "next_event_minute": next_event,
                     "next_event_label": _clock(state["base_clock_minute"] + next_event) if next_event is not None else None,
@@ -1910,10 +3472,16 @@ class GroundGraphEngine:
                 "events": events,
                 "agents": self._agents(),
                 "handoffs": self._handoffs(),
+                "tool_trace": self._tool_trace(),
+                "model_trace": self._model_trace(),
                 "causal_path": plan.get("causal_path") if plan else {"summary": "Waiting for the next disruption checkpoint.", "nodes": [], "edges": []},
                 "current_plan": plan,
                 "memory": {"episode_count": len(memories), "recalled": memories, "influence": influence},
                 "policies": {"authorization_complete": policy_complete, "applicable": policies},
+                "provenance": {
+                    "records": self._provenance_records(),
+                    "contract": "Observed and modeled fields are separated at record level.",
+                },
                 "metrics": {
                     "observed_condition_count": observed_condition_count,
                     "modeled_effect_delay_minutes": modeled_effect_delay,
@@ -1956,7 +3524,7 @@ class GroundGraphEngine:
             }
 
     def company_brain(self, question: str = "") -> dict[str, Any]:
-        """Return a source-aware answer over the synthetic operations knowledge graph."""
+        """Answer bounded operations questions from explicit knowledge paths."""
 
         with self._lock:
             rows = self.backend.query(
@@ -1988,7 +3556,7 @@ class GroundGraphEngine:
                 for row in rows
             ]
             policies = self._policies()
-            citations = [
+            all_citations = [
                 {
                     "policy_id": item["id"],
                     "procedure_id": item.get("procedure_id"),
@@ -2010,24 +3578,169 @@ class GroundGraphEngine:
                 }
                 for item in policies
             ]
-            return {
-                "ok": True,
-                "question": question
-                or "Which current rules authorize the recovery, who owns them, and what sources support them?",
-                "answer": (
-                    f"{len(citations)} current modeled policy versions cover the bounded recovery. "
-                    "Each authorization retains its owner, responsible role, document version, exact section, and excerpt."
-                ),
-                "truth_label": "MODELED_SYNTHETIC_COMPANY_KNOWLEDGE",
-                "citations": citations,
-                "artifacts": artifacts,
-                "graph_path": [
+            normalized = " ".join((question or "").lower().split())
+            answer_type = "INSUFFICIENT_EVIDENCE"
+            answer = (
+                "The bounded company graph does not contain enough evidence to answer that question. "
+                "Try asking about gate ownership, the open incident, current policy, or superseded policy history."
+            )
+            citations: list[dict[str, Any]] = []
+            evidence_ids: list[str] = []
+            graph_path: list[str] = []
+
+            if any(word in normalized for word in ("incident", "open issue", "ticket")):
+                incident_rows = self.backend.query(
+                    "MATCH (i:Incident)-[:REFERENCES]->(e:OperationalEvent) "
+                    "OPTIONAL MATCH (i)-[:AFFECTS]->(f:Flight) "
+                    "OPTIONAL MATCH (i)-[:OWNED_BY]->(team:Team) "
+                    "OPTIONAL MATCH (i)-[:RESPONSIBLE_ROLE]->(role:Role) "
+                    "RETURN i.id, i.title, i.status, i.created_at, i.fresh_until, "
+                    "e.id, e.summary, e.status, f.id, f.rotation_id, team.id, "
+                    "team.name, role.id, role.name ORDER BY i.created_at DESC"
+                ).result_set
+                if incident_rows:
+                    row = incident_rows[0]
+                    answer_type = "INCIDENT_STATUS"
+                    answer = (
+                        f"{row[0]} is {str(row[2]).lower()}: {row[1]}. It references "
+                        f"{row[5]} ({str(row[7]).lower()}) and affects {row[8] or 'no linked flight'}"
+                        f" on rotation {row[9] or 'not recorded'}. {row[11] or row[10]} owns it, "
+                        f"with {row[13] or row[12]} responsible. The record is fresh through {row[4]}."
+                    )
+                    evidence_ids = [str(value) for value in (row[0], row[5], row[8], row[10], row[12]) if value]
+                    citations = [
+                        {
+                            "id": row[0],
+                            "title": row[1],
+                            "status": row[2],
+                            "excerpt": row[6],
+                            "event_id": row[5],
+                            "flight_id": row[8],
+                            "rotation_id": row[9],
+                            "owner_team_id": row[10],
+                            "owner_team": row[11],
+                            "responsible_role_id": row[12],
+                            "responsible_role": row[13],
+                            "fresh_until": row[4],
+                            "freshness_status": "CURRENT_FOR_REPLAY",
+                        }
+                    ]
+                    graph_path = [
+                        "Incident-[:REFERENCES]->OperationalEvent",
+                        "Incident-[:AFFECTS]->Flight",
+                        "Incident-[:OWNED_BY]->Team",
+                        "Incident-[:RESPONSIBLE_ROLE]->Role",
+                    ]
+            elif any(word in normalized for word in ("supersed", "old policy", "history", "previous version")):
+                history_rows = self.backend.query(
+                    "MATCH (new)-[:SUPERSEDES]->(old) "
+                    "WHERE (new:Policy AND old:Policy) OR "
+                    "(new:ProcedureVersion AND old:ProcedureVersion) OR "
+                    "(new:SourceDocument AND old:SourceDocument) "
+                    "RETURN new.id, new.title, new.version, new.status, old.id, "
+                    "old.title, old.version, old.status ORDER BY new.id"
+                ).result_set
+                if history_rows:
+                    answer_type = "POLICY_HISTORY"
+                    def version_label(node_id: Any, version: Any) -> str:
+                        if version not in (None, ""):
+                            return str(version)
+                        identifier = str(node_id or "")
+                        return identifier.rsplit(":", 1)[-1] if ":" in identifier else "unversioned"
+                    phrases = [
+                        f"{row[0]} v{version_label(row[0], row[2])} ({row[3]}) supersedes "
+                        f"{row[4]} v{version_label(row[4], row[6])} ({row[7]})"
+                        for row in history_rows
+                    ]
+                    answer = "The graph preserves version history: " + "; ".join(phrases) + "."
+                    evidence_ids = sorted(
+                        {str(value) for row in history_rows for value in (row[0], row[4])}
+                    )
+                    citations = all_citations
+                    graph_path = ["CurrentVersion-[:SUPERSEDES]->PriorVersion"]
+            elif any(word in normalized for word in ("who", "owner", "owns", "authorize", "authorise", "responsible", "where written", "gate reassignment")):
+                if any(word in normalized for word in ("gate", "reassign")):
+                    action_type = "REASSIGN_GATE"
+                elif any(word in normalized for word in ("turn", "rotation", "bag")):
+                    action_type = "PROTECT_ROTATION"
+                elif any(word in normalized for word in ("flow", "runway", "sequence")):
+                    action_type = "RESEQUENCE_DEPARTURE"
+                elif any(word in normalized for word in ("automatic", "apply", "recovery")):
+                    action_type = "APPLY_VALIDATED_PLAN"
+                else:
+                    action_type = None
+                policy = (
+                    next(
+                        (item for item in policies if action_type in item["action_types"]),
+                        None,
+                    )
+                    if action_type
+                    else None
+                )
+                if policy:
+                    owner_rows = self.backend.query(
+                        "MATCH (team:Team {id: $team}), (role:Role {id: $role}) "
+                        "RETURN team.name, role.name",
+                        {
+                            "team": policy.get("owner_team_id"),
+                            "role": policy.get("responsible_role_id"),
+                        },
+                    ).result_set
+                    team_name, role_name = (
+                        owner_rows[0] if owner_rows else (policy.get("owner"), policy.get("responsible_role_id"))
+                    )
+                    answer_type = "OWNERSHIP_AND_AUTHORITY"
+                    answer = (
+                        f"{policy.get('owner')} is the named policy owner for {action_type}; "
+                        f"{team_name} is the owner team and {role_name} is the responsible role. Current policy "
+                        f"{policy['id']} v{policy['version']} authorizes it through procedure "
+                        f"{policy.get('procedure_id')} in {policy.get('document_id')}, section "
+                        f"{policy.get('source_section')}. {policy.get('source_excerpt')}"
+                    )
+                    citations = [
+                        item for item in all_citations if item["policy_id"] == policy["id"]
+                    ]
+                    evidence_ids = [
+                        str(value)
+                        for value in (
+                            policy["id"], policy.get("procedure_id"),
+                            policy.get("document_id"), policy.get("owner_team_id"),
+                            policy.get("responsible_role_id"),
+                        )
+                        if value
+                    ]
+                    graph_path = [
+                        "Policy-[:ALIGNED_WITH]->ProcedureVersion",
+                        "ProcedureVersion-[:IN_DOCUMENT]->SourceDocument",
+                        "Policy-[:OWNED_BY]->Team",
+                        "ProcedureVersion-[:RESPONSIBLE_ROLE]->Role",
+                    ]
+            elif not normalized or any(word in normalized for word in ("current", "policy", "rules", "procedure")):
+                answer_type = "CURRENT_POLICY_SET"
+                citations = all_citations
+                evidence_ids = [item["policy_id"] for item in citations]
+                answer = (
+                    f"{len(citations)} current policy versions authorize the bounded replay. "
+                    "Each one is linked to a current procedure, exact source section, owner team, and responsible role."
+                )
+                graph_path = [
                     "Action-[:AUTHORIZED_BY]->Policy",
                     "Policy-[:ALIGNED_WITH]->ProcedureVersion",
                     "ProcedureVersion-[:IN_DOCUMENT]->SourceDocument",
                     "Policy-[:OWNED_BY]->Team",
-                    "ProcedureVersion-[:RESPONSIBLE_ROLE]->Role",
-                ],
+                ]
+            return {
+                "ok": True,
+                "question": question
+                or "Which current rules authorize the recovery, who owns them, and what sources support them?",
+                "answer": answer,
+                "answer_type": answer_type,
+                "insufficient_evidence": answer_type == "INSUFFICIENT_EVIDENCE",
+                "truth_label": "MODELED_SYNTHETIC_COMPANY_KNOWLEDGE",
+                "citations": citations,
+                "artifacts": artifacts,
+                "evidence_ids": evidence_ids,
+                "graph_path": graph_path,
             }
 
     def health(self) -> dict[str, Any]:

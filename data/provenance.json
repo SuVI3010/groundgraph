@@ -1,13 +1,43 @@
 {
-  "manifest_version": "1.0",
+  "manifest_version": "1.1",
   "scenario_id": "ORD-2024-01-12-WINTER-AM",
   "scenario_file": {
     "path": "data/scenario.json",
-    "sha256": "9e46dcc51008ff6e51da3ba5982d7cb69ff194c7a6b3838fca33dc58c685fbb4"
+    "sha256": "28deae48351c6dd6a6accaefdae4e24378c4e42bd089bcc45e67f1395c7ef537"
   },
   "knowledge_file": {
     "path": "knowledge/manifest.json",
     "sha256": "3f508ed418b19bf03e0acd8abf1b842131fbc84b11484ea000921e643b205ac7"
+  },
+  "public_evidence": {
+    "readme": "data/public/README.md",
+    "extractor": {
+      "path": "data/public/extract_public_evidence.py",
+      "sha256": "1b7729616acb920a287276994e554b411f34475f39ab89ca0df8b09e1a09be30"
+    },
+    "extracts": [
+      {
+        "source_id": "BTS-2024-01",
+        "source_file_sha256": "fe089b45523f9d4ac0ccd0e176a543d274e914ee5ae5bd384dbaafc7dc06ebfd",
+        "path": "data/public/bts_ord_selected_flights_2024-01-12.csv",
+        "sha256": "fec2128a5aab66f183da1ad7a28d4cd210dd3ee45c7c64a48f42d90b58b227df",
+        "selection": "2024-01-12, UA, and the six exact flight-number/route tuples used in the replay"
+      },
+      {
+        "source_id": "NOAA-KORD-2024",
+        "source_file_sha256": "1f21901ce9998830e7078d28fbad99fc626d409d413d7d34c986b66a3df70176",
+        "path": "data/public/noaa_kord_selected_observations_2024-01-12.csv",
+        "sha256": "4e741031d52afd1193b8d23a6f6e889f8075282a8879e9f844a8ac65a086f2c1",
+        "selection": "KORD station 72530094846 at 2024-01-12T14:00:00Z and 2024-01-12T15:04:00Z"
+      },
+      {
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_file_sha256": "75431e9deb2a769f7041167a577ff6b746110effd190abf50f6a3a7ade8481cc",
+        "path": "data/public/faa_ord_selected_runways_2023-12-28.csv",
+        "sha256": "4949b9d599f7504ee34b4093b568ba673767a48fba5611c4bf0f79320f81f75c",
+        "selection": "APT_RWY.csv records for ORD runways 09R/27L, 10C/28C, and 10L/28R"
+      }
+    ]
   },
   "truth_classes": {
     "OBSERVED": "A value selected from a named public source.",
@@ -40,6 +70,7 @@
       "publisher": "Federal Aviation Administration",
       "title": "NASR airport and runway records",
       "url": "https://nfdc.faa.gov/webContent/28DaySub/extra/28_Dec_2023_APT_CSV.zip",
+      "landing_page_url": "https://www.faa.gov/air_traffic/flight_info/aeronav/Aero_Data/NASR_Subscription/2023-12-28/",
       "use": "ORD identity plus displayed runway designators and published lengths.",
       "decision_boundary": "The top-down screen is schematic; it does not claim surveyed taxiway geometry.",
       "truth_class": "OBSERVED"

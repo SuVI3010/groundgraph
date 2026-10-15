@@ -66,6 +66,20 @@ DB_PORT="${FALKORDB_PORT:-6379}"
 BROWSER_PORT="${FALKORDB_BROWSER_PORT:-3000}"
 
 if podman container exists "$CONTAINER_NAME"; then
+  ACTUAL_IMAGE="$(podman inspect -f '{{.Config.Image}}' "$CONTAINER_NAME")"
+  ACTUAL_DB_PORT="$(podman port "$CONTAINER_NAME" 6379/tcp 2>/dev/null || true)"
+  ACTUAL_BROWSER_PORT="$(podman port "$CONTAINER_NAME" 3000/tcp 2>/dev/null || true)"
+  if [[ "$ACTUAL_IMAGE" != "$IMAGE" \
+    || "$ACTUAL_DB_PORT" != "127.0.0.1:${DB_PORT}" \
+    || "$ACTUAL_BROWSER_PORT" != "127.0.0.1:${BROWSER_PORT}" ]]; then
+    echo "Replacing a mismatched $CONTAINER_NAME container; the persistent data volume is retained."
+    echo "  expected image/ports: $IMAGE, 127.0.0.1:${DB_PORT}, 127.0.0.1:${BROWSER_PORT}"
+    echo "  existing image/ports: $ACTUAL_IMAGE, ${ACTUAL_DB_PORT:-none}, ${ACTUAL_BROWSER_PORT:-none}"
+    podman rm -f "$CONTAINER_NAME" >/dev/null
+  fi
+fi
+
+if podman container exists "$CONTAINER_NAME"; then
   if [[ "$(podman inspect -f '{{.State.Running}}' "$CONTAINER_NAME")" != "true" ]]; then
     echo "Starting the existing FalkorDB container..."
     podman start "$CONTAINER_NAME" >/dev/null
@@ -86,11 +100,17 @@ fi
 echo "Waiting for FalkorDB on 127.0.0.1:${DB_PORT}..."
 for _ in {1..60}; do
   if podman exec "$CONTAINER_NAME" redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -q PONG; then
-    echo "Official FalkorDB is healthy. Browser: http://127.0.0.1:${BROWSER_PORT}"
-    exit 0
+    if podman exec "$CONTAINER_NAME" redis-cli --raw MODULE LIST 2>/dev/null | grep -Fxq graph; then
+      echo "Official FalkorDB is healthy. Browser: http://127.0.0.1:${BROWSER_PORT}"
+      exit 0
+    fi
+    echo "Redis answered PONG, but the FalkorDB graph module is not loaded." >&2
+    echo "Inspect with: podman logs $CONTAINER_NAME" >&2
+    exit 1
   fi
   sleep 1
 done
 
-echo "FalkorDB did not become healthy. Inspect with: podman logs $CONTAINER_NAME" >&2
+echo "FalkorDB did not become healthy with the graph module loaded." >&2
+echo "Inspect with: podman logs $CONTAINER_NAME" >&2
 exit 1
