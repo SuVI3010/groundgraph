@@ -12,6 +12,8 @@ GroundGraph enters all three 2026 FalkorDB GraphRAG Hackathon tracks:
 
 **[Watch the GroundGraph demo](demo/groundgraph-demo.mp4)** — full FalkorDB server through Podman, local Qwen selection, graph-coordinated specialists, guarded application, persistent memory, and live policy supersession.
 
+The [recording manifest](demo/groundgraph-demo.manifest.json) pins the source commit, runtime health, scene timings, media properties, and SHA-256 checksum for the final 3:49 demo.
+
 This repository is the event-period implementation for the [FalkorDB GraphRAG Hackathon](https://www.wemakedevs.org/hackathons/falkordb) and follows its [submission rules](https://www.wemakedevs.org/hackathons/falkordb/rules).
 
 The project is an airport-operations research replay. It does not issue air-traffic-control clearances, connect to live airport systems, or claim measured historical savings.

@@ -56,4 +56,5 @@ FalkorDB is the primary application state, not a visualization added after plann
 
 - Repository: `<PUBLIC_REPOSITORY_URL>`
 - Demo video: [`demo/groundgraph-demo.mp4`](../demo/groundgraph-demo.mp4)
+- Demo evidence manifest: [`demo/groundgraph-demo.manifest.json`](../demo/groundgraph-demo.manifest.json)
 - Live demo or local instructions: `docs/local-setup.md`

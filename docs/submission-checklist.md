@@ -19,12 +19,12 @@
 - [x] Public, derived, and modeled data are separated in a provenance manifest.
 - [x] Exact selected BTS, NOAA, and FAA rows are checked in with source hashes and reproducible extraction instructions.
 - [x] Flights, runways, gates, events, and turnarounds have stable record-level `SOURCED_FROM` or `MODELED_BY` graph paths.
-- [ ] Mixed flight, runway, and weather records show field-level provenance clearly in the final recorded demo.
+- [x] Mixed flight, runway, and weather records show field-level provenance clearly in the final recorded demo.
 - [x] All three tracks are declared with visible and stored proofs.
 - [x] All six optional MCP tools, including `get_coordinator_trace`, are documented and covered by a bounded-surface test.
 - [x] AI coding assistance and the product model are disclosed.
 - [ ] Disconnecting FalkorDB makes the server-mode API and mutations visibly unavailable; no browser simulation continues.
-- [ ] `/api/health` is captured with `runtime_mode: server`.
+- [x] `/api/health` is captured with `runtime_mode: server` in the final demo manifest.
 - [x] Automated tests pass on the final release candidate.
 - [x] Fresh official-server run persists memory across application restart.
 - [x] The full safe non-dominated ranking, context-bounded `model_candidate_set`, and matching `ModelRun.allowlisted_candidate_ids` are persisted and tested.
@@ -38,28 +38,28 @@
 
 ## Demo assets
 
-- [ ] Re-record the final video from the hardened release candidate; the earlier 2:43 recording predates the final graph-proof changes.
-- [ ] Audio is intelligible at normal volume.
-- [ ] The first 30 seconds show the problem, product, and provenance boundary.
-- [ ] The recording includes one model/fallback badge with truthful narration.
-- [ ] Track 1 shows the full safe ranking, event-class cost-window shortlist, matching model allowlist, distinct candidate tradeoffs, persisted causal relationships, and policy-authorized application.
-- [ ] Track 2 shows six uniquely identified timestamped Cypher handoffs, contextual recall, and the applied episode's same six specialist chains plus full decision lineage after reset.
-- [ ] Track 3 shows question-routed Operations Brain answers, source/owner/version evidence, and policy mutation.
-- [ ] The server-side autonomy toggle is visibly demonstrated in both supervised and guarded-auto modes.
+- [x] Final 3:49 video was recorded from release commit `8933812` after all graph-proof changes.
+- [x] Audio is intelligible at normal volume and media QA records its levels.
+- [x] The first 30 seconds show the problem, product, and provenance boundary.
+- [x] The recording includes one model/fallback badge with truthful narration.
+- [x] Track 1 shows the full safe ranking, event-class cost-window shortlist, matching model allowlist, distinct candidate tradeoffs, persisted causal relationships, and policy-authorized application.
+- [x] Track 2 shows six uniquely identified timestamped Cypher handoffs, contextual recall, and the applied episode's same six specialist chains plus full decision lineage after reset.
+- [x] Track 3 shows question-routed Operations Brain answers, source/owner/version evidence, and policy mutation.
+- [x] The server-side autonomy toggle is visibly demonstrated in both supervised and guarded-auto modes.
 - [ ] Video link works in a signed-out browser.
 - [x] Screenshot/thumbnail uses the final interface.
 
 ## Submission form
 
-- [ ] Product name: `GroundGraph`.
-- [ ] Tracks: `Agents That Act on Connected Data`, `Agent Memory and Coordination`, `Company Brain`.
+- [x] Product name: `GroundGraph`.
+- [x] Tracks: `Agents That Act on Connected Data`, `Agent Memory and Coordination`, `Company Brain`.
 - [ ] Repository URL: `<PUBLIC_REPOSITORY_URL>`.
 - [x] Demo asset: [`demo/groundgraph-demo.mp4`](../demo/groundgraph-demo.mp4); replace with its public repository URL after publishing.
-- [ ] Live URL or complete local setup path: `docs/local-setup.md`.
+- [x] Complete local setup path: `docs/local-setup.md`.
 - [ ] Team members and roles are correct.
 - [ ] Every team member is registered on only this team and can explain the graph model, key Cypher, architecture, model boundary, and data provenance.
 - [ ] Team ownership of event-period code and assets is agreed.
-- [ ] All external libraries, public data, and AI tools are disclosed.
+- [x] All external libraries, public data, and AI tools are disclosed.
 - [ ] Final form is submitted before the official deadline and confirmation is saved.
 
 ## Side-prize asset
