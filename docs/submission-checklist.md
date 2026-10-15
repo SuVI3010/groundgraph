@@ -38,7 +38,7 @@
 
 ## Demo assets
 
-- [x] Final 3:49 video was recorded from release commit `8933812` after all graph-proof changes.
+- [x] Final 3:49 video was recorded from hardened release commit `d530e5a` after the episode-scoped graph-proof changes.
 - [x] Audio is intelligible at normal volume and media QA records its levels.
 - [x] The first 30 seconds show the problem, product, and provenance boundary.
 - [x] The recording includes one model/fallback badge with truthful narration.

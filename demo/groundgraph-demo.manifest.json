@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-10-15T06:02:08.672Z",
+  "created_at": "2026-10-15T06:35:47.283Z",
   "source_url": "http://127.0.0.1:5050/",
   "viewport": "1440x900",
   "health": {
@@ -29,56 +29,56 @@
       "title": "GroundGraph and the evidence boundary",
       "narration": "Meet GroundGraph, a graph-native recovery command center for airport operations. This bounded replay uses the full local FalkorDB server and a local Qwen model. Selected schedule, weather, and runway fields come from public records. Gates, disruptions, policies, and every recovery effect are clearly labeled as modeled. The top-down airport view is a research sandbox, not a live air traffic control system.",
       "audio_duration_seconds": 23.781179,
-      "visual_duration_seconds": 25.783
+      "visual_duration_seconds": 25.782
     },
     {
       "id": "coordination",
       "title": "One disruption, six graph specialists",
       "narration": "At eight thirty-six, a modeled baggage-reconciliation delay adds twelve minutes to the stored turnaround task graph for the U A fourteen fourteen to U A twenty-six seventy-two rotation. Six specialists now execute separate Cypher reads against one FalkorDB state version. Weather, runway flow, compatible gates, turnaround dependencies, current policy, and contextual memory each hand a versioned finding to the coordinator before it may choose a plan. The Cycles view exposes those query names, evidence identifiers, timestamps, and consumed handoffs.",
       "audio_duration_seconds": 31.773379,
-      "visual_duration_seconds": 33.774
+      "visual_duration_seconds": 33.776
     },
     {
       "id": "decision",
       "title": "Bounded local-model selection with graph proof",
       "narration": "GroundGraph builds three materially different strategies from connected state: flow balance, a compatible gate swap, and turnaround-task recovery. Projected recovery and operational burden come from the graph, and cost score is lower-is-better. The server computes the full safe non-dominated ranking, then forms a context-bounded model shortlist: within four cost points of the leader for a turnaround event class, or eight for other event classes. Only those shortlist identifiers enter the Model Run allowlist, and local Qwen selects one of them. The visible causal path is then queried from relationships already stored in FalkorDB. Evidence cards expose stable source-record identifiers and the observed and modeled fields behind each entity.",
       "audio_duration_seconds": 39.602766,
-      "visual_duration_seconds": 41.604
+      "visual_duration_seconds": 41.606
     },
     {
       "id": "application",
       "title": "Fresh validation and bounded autonomy",
       "narration": "Qwen proposes; it does not execute. Before application, the server rechecks graph version, required relationships, current policy and company knowledge, source freshness, minimum benefit, the execution freeze, and the churn guard. The autonomy switch changes the server setting. Turning it on revalidates the pending proposal, applies the modeled recovery once, and writes an Outcome. Turning it off again leaves later proposals available for inspection.",
       "audio_duration_seconds": 25.855193,
-      "visual_duration_seconds": 27.857
+      "visual_duration_seconds": 27.858
     },
     {
       "id": "memory",
       "title": "Persistent, context-matched episodic memory",
       "narration": "Application also preserves the complete Decision Episode to Plan to Outcome and Memory lineage, together with the same six unique Agent Run to Finding to Handoff chains consumed by that episode. The memory records event class, flights, rotation, resources, policies, and a disruption signature. Restarting the replay reseeds operations while restoring that applied lineage and all six specialist chains in FalkorDB. On the next matching baggage cycle, the coordinator states exactly whether memory adjusted the lower-is-better cost or changed the selected strategy. An unrelated weather cycle cannot reuse this baggage memory.",
       "audio_duration_seconds": 34.245397,
-      "visual_duration_seconds": 36.247
+      "visual_duration_seconds": 36.248
     },
     {
       "id": "knowledge",
       "title": "Operations Brain and live policy supersession",
       "narration": "For the third track, Operations Brain routes plain-language questions to different bounded traversals. Ownership questions return the current policy, owner, responsible role, source excerpt, and graph path. Incident questions follow a separate set of connected records. Publishing the synthetic replacement gate policy creates a SUPERSEDES relationship, advances graph state, invalidates stale proposals, and triggers replanning without an application-code change. The new cycle consumes the replacement version while the old version remains queryable as history.",
       "audio_duration_seconds": 30.947075,
-      "visual_duration_seconds": 32.948
+      "visual_duration_seconds": 32.95
     },
     {
       "id": "continuous",
       "title": "Continuous replanning with restraint",
       "narration": "At nine oh four, the next time-gated public weather observation enters the graph and triggers another coordinated check. Continuous replanning does not mean constant intervention: the system records the cycle and declines unnecessary churn when no material recovery is available. Across all three tracks, FalkorDB determines what the agents can see, how they coordinate and remember, and which current company knowledge authorizes an action. Every improvement shown here is projected under the replay assumptions, never claimed as measured real-world savings.",
       "audio_duration_seconds": 29.485578,
-      "visual_duration_seconds": 31.485
+      "visual_duration_seconds": 31.489
     }
   ],
   "output": "demo/groundgraph-demo.mp4",
-  "duration_seconds": 229.36,
-  "sha256": "376a5d798dc219c0295dab5bbdee510866d36f1f1f5de38483f4e68bc40b0f7f",
-  "frame_count": 3403,
-  "source_commit": "8933812123291ed487bf57d62d289cf567c774c9",
+  "duration_seconds": 229.381667,
+  "sha256": "781275a81a869e9ddc4634e43d3e295eda842374ef4b1f87b22ef292f62848f5",
+  "frame_count": 3404,
+  "source_commit": "d530e5a4286772cb8e5e60290ac4527f0c18785e",
   "media_qa": {
     "full_decode": "passed",
     "black_segments_detected": 0,
@@ -92,8 +92,8 @@
       "sample_rate_hz": 48000,
       "channels": 2,
       "mean_volume_db": -18.6,
-      "max_volume_db": -3.7
+      "max_volume_db": -3.8
     },
-    "scene_transition_silence_max_seconds": 2.205
+    "no_silence_at_or_above_seconds": 2.3
   }
 }
