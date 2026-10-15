@@ -86,6 +86,13 @@ function planSafety(plan) {
   const validationPassed = validation.passed !== false;
   return { authorization, validation, checks, passedCount, knowledgeCurrent, policyComplete, validationPassed, safe: policyComplete && knowledgeCurrent && validationPassed };
 }
+function coordinatorToolsForPlan(toolTrace, plan) {
+  const trace = list(toolTrace); const episodeId = String(plan?.episode_id || "");
+  const episodeTools = episodeId ? trace.filter((tool) => String(tool.episode_id || "") === episodeId) : [];
+  const legacyTools = trace.filter((tool) => !tool.episode_id && number(tool.cycle) === number(plan?.cycle));
+  const matchingTools = episodeTools.length ? episodeTools : episodeId ? legacyTools : trace.filter((tool) => number(tool.cycle) === number(plan?.cycle));
+  return matchingTools.sort((a, b) => number(a.sequence) - number(b.sequence)).slice(0, 4);
+}
 function showToast(message) {
   const toast = $("toast"); toast.textContent = message; toast.hidden = false;
   clearTimeout(showToast.timer); showToast.timer = setTimeout(() => { toast.hidden = true; }, 2800);
@@ -389,7 +396,7 @@ function renderPlan() {
     const disposition = chosen ? "SELECTED" : considered ? "MODEL SHORTLIST" : "WITHHELD BY CONTEXT WINDOW";
     return `<span class="candidate-row ${chosen ? "chosen" : ""} ${considered ? "model-shortlist" : "context-withheld"}"><b>${escapeHtml(humanize(candidate.strategy))}</b><small>${number(candidate.recovered_minutes)}m recovery · ${number(candidate.burden_minutes)}m coordination</small><em>${number(candidate.cost_score)} cost · ${disposition}</em></span>`;
   }).join("");
-  const tools = list(snapshot.tool_trace).filter((tool) => number(tool.cycle) === number(plan.cycle)).sort((a, b) => number(a.sequence) - number(b.sequence)).slice(0, 4);
+  const tools = coordinatorToolsForPlan(snapshot.tool_trace, plan);
   const toolRows = tools.map((tool) => `<span title="${escapeHtml(first(tool.result_summary, "Graph check completed"))}">✓ ${escapeHtml(humanize(tool.name))}</span>`).join("");
   $("decision-envelope").innerHTML = `${candidates.length ? `<section><header><b>SAFE NON-DOMINATED RANKING</b><small>${candidates.length} safe · ${modelIds.size} sent to Qwen · lower cost is better</small></header>${candidateRows}</section>` : ""}${tools.length ? `<section><header><b>COORDINATOR CHECKS</b><small>persisted tool trace</small></header><div class="tool-chips">${toolRows}</div></section>` : ""}`;
   updatePrimaryAction();
