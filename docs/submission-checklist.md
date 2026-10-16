@@ -47,7 +47,7 @@
 - [x] Track 2 shows six parallel specialist findings, a genuine no-action replan, contextual memory, and preservation of the applied ORD episode after switching airport graphs.
 - [x] Track 3 shows a question-routed Operations Brain ownership answer with its connected procedure and evidence path.
 - [x] The video uses supervised manual approval; guarded auto-application remains available in the UI and is covered by server tests.
-- [ ] Video link works in a signed-out browser.
+- [x] Video link works in a signed-out browser.
 - [x] Screenshot/thumbnail uses the final interface.
 
 ## Submission form
