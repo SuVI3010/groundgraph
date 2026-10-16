@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-10-15T06:35:47.283Z",
+  "created_at": "2026-10-16T10:22:32.622Z",
   "source_url": "http://127.0.0.1:5050/",
   "viewport": "1440x900",
   "health": {
@@ -20,68 +20,117 @@
     }
   },
   "narration": {
-    "voice": "Samantha",
-    "rate": "190"
+    "voice": "Daniel",
+    "rate": "185",
+    "word_count": 339,
+    "burned_in_subtitles": true
+  },
+  "semantic_proof": {
+    "applied": {
+      "episode_id": "EPISODE-8-1792145986811349000",
+      "plan_id": "PLAN-8-1792145986811349000-TURNAROUND_RECOVERY",
+      "graph_version": 2,
+      "findings": 6,
+      "allowlisted_candidates": 3,
+      "guards_passed": 7,
+      "recovered_minutes": 12
+    },
+    "no_action": {
+      "episode_id": "EPISODE-9-1792146077777940000",
+      "cycle": 9,
+      "result_kind": "NO_ACTION",
+      "reason": "No connected delay exceeded the four-minute benefit threshold, so changing operations would add work without enough recovery.",
+      "model_stage": "skipped",
+      "apply_stage": "skipped"
+    },
+    "airport_switch": {
+      "from": "ORD",
+      "to": "ATL",
+      "from_graph": "groundgraph",
+      "to_graph": "groundgraph_atl",
+      "distinct_flights": true,
+      "distinct_resources": true,
+      "ord_episode_restored": true
+    }
   },
   "scenes": [
     {
-      "id": "overview",
-      "title": "GroundGraph and the evidence boundary",
-      "narration": "Meet GroundGraph, a graph-native recovery command center for airport operations. This bounded replay uses the full local FalkorDB server and a local Qwen model. Selected schedule, weather, and runway fields come from public records. Gates, disruptions, policies, and every recovery effect are clearly labeled as modeled. The top-down airport view is a research sandbox, not a live air traffic control system.",
-      "audio_duration_seconds": 23.781179,
-      "visual_duration_seconds": 25.782
+      "id": "hook",
+      "title": "One delay, one connected rotation",
+      "narration": "At eight thirty-six at Chicago O'Hare, a modeled baggage delay adds twelve minutes to U A fourteen fourteen's turnaround, putting U A twenty-six seventy-two at risk. GroundGraph must recover time without breaking policy.",
+      "audio_duration_seconds": 13.389887,
+      "visual_duration_seconds": 14.892
     },
     {
-      "id": "coordination",
-      "title": "One disruption, six graph specialists",
-      "narration": "At eight thirty-six, a modeled baggage-reconciliation delay adds twelve minutes to the stored turnaround task graph for the U A fourteen fourteen to U A twenty-six seventy-two rotation. Six specialists now execute separate Cypher reads against one FalkorDB state version. Weather, runway flow, compatible gates, turnaround dependencies, current policy, and contextual memory each hand a versioned finding to the coordinator before it may choose a plan. The Cycles view exposes those query names, evidence identifiers, timestamps, and consumed handoffs.",
-      "audio_duration_seconds": 31.773379,
-      "visual_duration_seconds": 33.776
+      "id": "why-now",
+      "title": "Why GroundGraph decided now",
+      "narration": "Why now? U A twenty-six seventy-two leaves at nine twenty-five, forty-nine minutes away, but its turnaround needs fifty-seven. The eight-minute gap opens a FalkorDB decision episode and locks all six specialists to one graph version.",
+      "audio_duration_seconds": 14.503537,
+      "visual_duration_seconds": 16.006
     },
     {
-      "id": "decision",
-      "title": "Bounded local-model selection with graph proof",
-      "narration": "GroundGraph builds three materially different strategies from connected state: flow balance, a compatible gate swap, and turnaround-task recovery. Projected recovery and operational burden come from the graph, and cost score is lower-is-better. The server computes the full safe non-dominated ranking, then forms a context-bounded model shortlist: within four cost points of the leader for a turnaround event class, or eight for other event classes. Only those shortlist identifiers enter the Model Run allowlist, and local Qwen selects one of them. The visible causal path is then queried from relationships already stored in FalkorDB. Evidence cards expose stable source-record identifiers and the observed and modeled fields behind each entity.",
-      "audio_duration_seconds": 39.602766,
-      "visual_duration_seconds": 41.606
+      "id": "findings",
+      "title": "Six specialists read one graph",
+      "narration": "Six specialists read that state in parallel. Weather checks conditions. Flow checks runway capacity. Gate checks compatibility. Turnaround finds the delayed task chain. Policy confirms authority. Memory searches matching outcomes. The coordinator waits until all six versioned findings are stored.",
+      "audio_duration_seconds": 18.774785,
+      "visual_duration_seconds": 20.276
     },
     {
-      "id": "application",
-      "title": "Fresh validation and bounded autonomy",
-      "narration": "Qwen proposes; it does not execute. Before application, the server rechecks graph version, required relationships, current policy and company knowledge, source freshness, minimum benefit, the execution freeze, and the churn guard. The autonomy switch changes the server setting. Turning it on revalidates the pending proposal, applies the modeled recovery once, and writes an Outcome. Turning it off again leaves later proposals available for inspection.",
-      "audio_duration_seconds": 25.855193,
-      "visual_duration_seconds": 27.858
+      "id": "options",
+      "title": "Three options, one bounded model choice",
+      "narration": "Now the tradeoff is visible. Turnaround recovery saves twelve minutes with four minutes of coordination. Flow balance saves twelve but spends runway flexibility. Gate recovery moves the rotation and saves six. The server validates and ranks all three before Qwen sees their identifiers. Qwen selects one allowlisted fit, and its choice is stored beside the shortlist.",
+      "audio_duration_seconds": 21.421769,
+      "visual_duration_seconds": 23.001
     },
     {
-      "id": "memory",
-      "title": "Persistent, context-matched episodic memory",
-      "narration": "Application also preserves the complete Decision Episode to Plan to Outcome and Memory lineage, together with the same six unique Agent Run to Finding to Handoff chains consumed by that episode. The memory records event class, flights, rotation, resources, policies, and a disruption signature. Restarting the replay reseeds operations while restoring that applied lineage and all six specialist chains in FalkorDB. On the next matching baggage cycle, the coordinator states exactly whether memory adjusted the lower-is-better cost or changed the selected strategy. An unrelated weather cycle cannot reuse this baggage memory.",
-      "audio_duration_seconds": 34.245397,
-      "visual_duration_seconds": 36.248
+      "id": "apply",
+      "title": "Seven checks before one application",
+      "narration": "The model cannot execute. The validator rereads graph version, target links, authority, knowledge freshness, benefit, execution freeze, and churn. Seven checks pass. One click writes the actions and modeled outcome to FalkorDB. Only now does projected delay move from thirty to eighteen minutes: twelve recovered under replay assumptions.",
+      "audio_duration_seconds": 21.94458,
+      "visual_duration_seconds": 24
     },
     {
-      "id": "knowledge",
-      "title": "Operations Brain and live policy supersession",
-      "narration": "For the third track, Operations Brain routes plain-language questions to different bounded traversals. Ownership questions return the current policy, owner, responsible role, source excerpt, and graph path. Incident questions follow a separate set of connected records. Publishing the synthetic replacement gate policy creates a SUPERSEDES relationship, advances graph state, invalidates stale proposals, and triggers replanning without an application-code change. The new cycle consumes the replacement version while the old version remains queryable as history.",
-      "audio_duration_seconds": 30.947075,
-      "visual_duration_seconds": 32.95
+      "id": "restraint",
+      "title": "Continuous replanning also means no action",
+      "narration": "At the next checkpoint, GroundGraph reads again. The projected benefit is now below the four-minute benefit threshold. The log records no action; model selection and application are skipped. Continuous replanning includes knowing when not to disturb a stable operation.",
+      "audio_duration_seconds": 15.704717,
+      "visual_duration_seconds": 18
     },
     {
-      "id": "continuous",
-      "title": "Continuous replanning with restraint",
-      "narration": "At nine oh four, the next time-gated public weather observation enters the graph and triggers another coordinated check. Continuous replanning does not mean constant intervention: the system records the cycle and declines unnecessary churn when no material recovery is available. Across all three tracks, FalkorDB determines what the agents can see, how they coordinate and remember, and which current company knowledge authorizes an action. Every improvement shown here is projected under the replay assumptions, never claimed as measured real-world savings.",
-      "audio_duration_seconds": 29.485578,
-      "visual_duration_seconds": 31.489
+      "id": "memory-knowledge",
+      "title": "Memory and company knowledge stay connected",
+      "narration": "The outcome becomes memory tied to event class, rotation, resources, and policy. A matching disruption may use it; unrelated weather cannot. Operations Brain follows the same graph to name the gate-recovery owner, responsible role, procedure, source section, and evidence path. Memory and company knowledge remain inspectable.",
+      "audio_duration_seconds": 20.934739,
+      "visual_duration_seconds": 22.435
+    },
+    {
+      "id": "airports",
+      "title": "The same decision contract, another airport",
+      "narration": "GroundGraph is not hard-coded to O'Hare. Atlanta loads a distinct FalkorDB graph with different flights, runways, weather, and evidence. Returning to O'Hare restores its applied decision.",
+      "audio_duration_seconds": 11.926349,
+      "visual_duration_seconds": 13.428
+    },
+    {
+      "id": "close",
+      "title": "Every intervention explained",
+      "narration": "One shared graph. Six specialists. A bounded local model. Every intervention explained before it is applied.",
+      "audio_duration_seconds": 7.200862,
+      "visual_duration_seconds": 8.701
     }
   ],
   "output": "demo/groundgraph-demo.mp4",
-  "duration_seconds": 229.381667,
-  "sha256": "781275a81a869e9ddc4634e43d3e295eda842374ef4b1f87b22ef292f62848f5",
-  "frame_count": 3405,
-  "source_commit": "d530e5a4286772cb8e5e60290ac4527f0c18785e",
+  "duration_seconds": 160.317,
+  "sha256": "a7b6bf7250ca121e4a4edbd9a6447252ded0a603f849af7a6747577c5aabffd3",
+  "frame_count": 3124,
+  "source_commit": "3348d4d56fc9160613aef1c4ed5ccc9294ad1612",
+  "promoted_at": "2026-10-16T10:28:04.452754Z",
+  "cover": "demo/groundgraph-demo-cover.jpg",
+  "cover_sha256": "851ca6219c1d735b2f1f2954bfab8dada925e8fc09db5568480fa07d6e22ca2e",
   "media_qa": {
     "full_decode": "passed",
     "black_segments_detected": 0,
+    "burned_captions_visual_review": "passed",
+    "contact_sheet_visual_review": "passed",
     "video": {
       "codec": "h264",
       "width": 1440,
@@ -91,9 +140,13 @@
       "codec": "aac",
       "sample_rate_hz": 48000,
       "channels": 2,
-      "mean_volume_db": -18.6,
-      "max_volume_db": -3.8
+      "mean_volume_db": -19.5,
+      "max_volume_db": -1.4
     },
-    "no_silence_at_or_above_seconds": 2.3
+    "silence_review": {
+      "threshold_db": -45,
+      "longest_seconds": 2.499,
+      "result": "scene transitions only"
+    }
   }
 }

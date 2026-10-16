@@ -20,7 +20,7 @@
 - [x] Public, derived, and modeled data are separated in a provenance manifest.
 - [x] Exact selected BTS, NOAA, and FAA rows are checked in with source hashes and reproducible extraction instructions.
 - [x] Flights, runways, gates, events, and turnarounds have stable record-level `SOURCED_FROM` or `MODELED_BY` graph paths.
-- [x] Mixed flight, runway, and weather records show field-level provenance clearly in the final recorded demo.
+- [x] Mixed flight, runway, and weather records retain field-level provenance in the graph and proof UI; the recorded demo keeps the observed/modeled boundary visible without opening every field list.
 - [x] All three tracks are declared with visible and stored proofs.
 - [x] All six optional MCP tools, including `get_coordinator_trace`, are documented and covered by a bounded-surface test.
 - [x] AI coding assistance and the product model are disclosed.
@@ -39,14 +39,14 @@
 
 ## Demo assets
 
-- [x] Final 3:49 video was recorded from hardened release commit `d530e5a` after the episode-scoped graph-proof changes.
+- [x] Final 2:40 video was recorded from hardened source commit `3348d4d` with the simplified decision story and multi-airport replay.
 - [x] Audio is intelligible at normal volume and media QA records its levels.
 - [x] The first 30 seconds show the problem, product, and provenance boundary.
 - [x] The recording includes one model/fallback badge with truthful narration.
-- [x] Track 1 shows the full safe ranking, event-class cost-window shortlist, matching model allowlist, distinct candidate tradeoffs, persisted causal relationships, and policy-authorized application.
-- [x] Track 2 shows six uniquely identified timestamped Cypher handoffs, contextual recall, and the applied episode's same six specialist chains plus full decision lineage after reset.
-- [x] Track 3 shows question-routed Operations Brain answers, source/owner/version evidence, and policy mutation.
-- [x] The server-side autonomy toggle is visibly demonstrated in both supervised and guarded-auto modes.
+- [x] Track 1 shows three safe tradeoffs, Qwen's bounded choice, seven execution guards, and a policy-authorized application; the manifest verifies the persisted allowlist and selected ID.
+- [x] Track 2 shows six parallel specialist findings, a genuine no-action replan, contextual memory, and preservation of the applied ORD episode after switching airport graphs.
+- [x] Track 3 shows a question-routed Operations Brain ownership answer with its connected procedure and evidence path.
+- [x] The video uses supervised manual approval; guarded auto-application remains available in the UI and is covered by server tests.
 - [ ] Video link works in a signed-out browser.
 - [x] Screenshot/thumbnail uses the final interface.
 
