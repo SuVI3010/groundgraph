@@ -48,13 +48,15 @@ RUNTIME_ACTIONS = {
 LINK_RE = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 REQUIRED_DEMO_SCENES = (
-    "overview",
-    "coordination",
-    "decision",
-    "application",
-    "memory",
-    "knowledge",
-    "continuous",
+    "hook",
+    "why-now",
+    "findings",
+    "options",
+    "apply",
+    "restraint",
+    "memory-knowledge",
+    "airports",
+    "close",
 )
 
 
@@ -129,8 +131,8 @@ def demo_manifest_errors() -> list[str]:
     )
     if scene_ids != REQUIRED_DEMO_SCENES:
         errors.append(
-            "demo scenes must cover overview, coordination, decision, application, "
-            "memory, knowledge, and continuous replanning in order"
+            "demo scenes must cover the trigger, six findings, bounded model choice, "
+            "application, restraint, memory and knowledge, and airport reuse in order"
         )
     if float(manifest.get("duration_seconds", 0)) < 60:
         errors.append("demo duration is implausibly short")
