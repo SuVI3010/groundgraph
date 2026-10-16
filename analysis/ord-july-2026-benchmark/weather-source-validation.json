@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "station": "KORD / USW00094846",
+  "month": "2026-07",
+  "noaa": {
+    "publisher": "NOAA National Centers for Environmental Information",
+    "dataset": "GHCN-hourly",
+    "url": "https://noaa-ghcnh-pds.s3.us-east-1.amazonaws.com/hourly/access/by-year/2026/psv/GHCNh_USW00094846_2026.psv",
+    "sha256_at_verification": "a9ebe5a182fa209144bb1099d4a0cc065206863e50befbeda4181561b57ea149",
+    "report_types": [
+      "FM15",
+      "FM16"
+    ],
+    "observations": 891
+  },
+  "iem": {
+    "publisher": "Iowa Environmental Mesonet, Iowa State University",
+    "url": "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?network=IL_ASOS&station=ORD&data=all&year1=2026&month1=7&day1=1&year2=2026&month2=8&day2=1&tz=America%2FChicago&format=onlycomma&latlon=no&elev=no&missing=M&trace=T&direct=no&report_type=2",
+    "sha256": "45e59c39ef2ef8058794bf02dcc4e3679e58c8faf79435f1a6db637cbaf48152",
+    "observations": 893
+  },
+  "exact_timestamp_and_raw_metar_matches": 891,
+  "noaa_rows_missing_from_iem": [],
+  "iem_rows_absent_from_noaa_snapshot": [
+    {
+      "observed_at_local": "2026-07-20T11:51-05:00",
+      "raw_metar": "KORD 201651Z 23008KT 7SM BKN200 OVC250 26/17 A2990 RMK AO2 SLP122 T02560172"
+    },
+    {
+      "observed_at_local": "2026-07-20T12:51-05:00",
+      "raw_metar": "KORD 201751Z 22012G18KT 7SM SCT150 BKN200 OVC250 26/18 A2990 RMK AO2 SLP121 T02560178 10261 20194 56014"
+    }
+  ],
+  "verdict": "Every NOAA FM15/FM16 July observation is present byte-for-byte in the IEM input. IEM has two additional July 20 routine observations absent from the downloaded NOAA annual snapshot."
+}

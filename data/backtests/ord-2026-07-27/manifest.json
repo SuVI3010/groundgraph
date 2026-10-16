@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "pack_id": "ord-2026-07-27",
-  "day_summary": "ORD's 2026-07-27 local scheduled-operation cohort contains 2,164 reporting-carrier domestic segments: 1,081 departures and 1,083 arrivals. The realized record includes 864 cancellations, 88 diversions, and 606 ORD endpoint delays of at least 15 minutes. Observed METARs show early low visibility followed by two thunderstorm periods; the raw observations remain available in weather.csv.",
+  "day_summary": "ORD's 2026-07-27 local scheduled-operation cohort contains 2,164 reporting-carrier domestic segments: 1,081 departures and 1,083 arrivals. The realized record includes 864 cancellations, 88 diversions, and 606 ORD endpoint delays of at least 15 minutes. Archived KORD METAR observations for the same local day remain available in weather.csv.",
   "airport": {
     "iata": "ORD",
     "icao": "KORD",
@@ -12,7 +12,7 @@
     "service_date": "2026-07-27",
     "local_start": "2026-07-27T00:00:00-05:00",
     "local_end_exclusive": "2026-07-28T00:00:00-05:00",
-    "flight_selection": "Departures use Origin == ORD and BTS FlightDate == 2026-07-27. Arrivals use Dest == ORD and a scheduled ORD arrival date of 2026-07-27, including prior-origin-date overnight flights and excluding flights scheduled to reach ORD on 2026-07-28.",
+    "flight_selection": "Departures use Origin == ORD and BTS FlightDate == 2026-07-27. Arrivals use Dest == ORD and a resolved scheduled ORD arrival date of 2026-07-27, including prior-origin-date overnight flights and excluding flights scheduled to reach ORD on 2026-07-28.",
     "arrival_date_derivation": "BTS does not publish a scheduled arrival date. The builder solves scheduled elapsed minutes = arrival clock - departure clock + day offset - (ORD UTC offset - origin UTC offset) against the valid U.S. domestic offset differences [-60, 0, 60, 120, 180, 240, 300] minutes. Every inbound candidate must produce exactly one day offset."
   },
   "truth_boundaries": {

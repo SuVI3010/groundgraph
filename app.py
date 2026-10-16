@@ -21,6 +21,9 @@ from engine import GraphNotReadyError, GroundGraphEngine
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_REGISTRY_PATH = BASE_DIR / "data" / "scenario-registry.json"
+DEFAULT_BACKTEST_BENCHMARK_PATH = (
+    BASE_DIR / "analysis" / "ord-july-2026-benchmark" / "benchmark.json"
+)
 
 
 def load_scenario_registry(path: Path | str | None = None) -> dict[str, Any]:
@@ -114,6 +117,7 @@ def create_app(
     scenario_engine_factory: Any | None = None,
     backtest_root: Path | str | None = None,
     backtest_runtime_factory: Any | None = None,
+    backtest_benchmark_path: Path | str | None = None,
 ) -> Flask:
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["JSON_SORT_KEYS"] = False
@@ -140,6 +144,13 @@ def create_app(
     selected_backtest_root = Path(
         backtest_root
         or os.getenv("GROUNDGRAPH_BACKTEST_ROOT", str(DEFAULT_BACKTEST_ROOT))
+    ).resolve()
+    selected_benchmark_path = Path(
+        backtest_benchmark_path
+        or os.getenv(
+            "GROUNDGRAPH_BACKTEST_BENCHMARK_PATH",
+            str(DEFAULT_BACKTEST_BENCHMARK_PATH),
+        )
     ).resolve()
     backtest_holder: dict[str, Any] = {
         "active_backtest_id": None,
@@ -372,10 +383,21 @@ def create_app(
     def backtests():
         entries, _by_id = backtest_registry()
         active_id = backtest_holder.get("active_backtest_id")
+        preferred_default = os.getenv(
+            "GROUNDGRAPH_DEFAULT_BACKTEST", "ord-2026-07-27"
+        )
+        default_id = (
+            preferred_default
+            if any(str(item["id"]) == preferred_default for item in entries)
+            else str(entries[0]["id"])
+            if entries
+            else None
+        )
         return jsonify(
             {
                 "ok": True,
                 "active_backtest_id": active_id,
+                "default_backtest_id": default_id,
                 "backtests": [
                     {
                         **public_backtest_entry(entry),
@@ -386,6 +408,46 @@ def create_app(
                 ],
             }
         )
+
+    @app.get("/api/backtests/benchmark")
+    def backtest_benchmark():
+        if not selected_benchmark_path.is_file():
+            return jsonify({"ok": False, "error": "Multi-day benchmark is unavailable"}), 404
+        try:
+            payload = json.loads(selected_benchmark_path.read_text(encoding="utf-8"))
+            metrics = payload.get("metrics", {})
+            model = payload.get("historical_analog_model") or {}
+            return jsonify(
+                {
+                    "ok": True,
+                    "evaluation": payload.get("evaluation", {}),
+                    "metrics": {
+                        key: metrics.get(key, {})
+                        for key in (
+                            "SCHEDULE_BASELINE",
+                            "DETERMINISTIC",
+                            "HISTORICAL_ANALOG",
+                        )
+                        if key in metrics
+                    },
+                    "delay_causes": payload.get("delay_causes", {}),
+                    "model": {
+                        key: model.get(key)
+                        for key in (
+                            "model_id",
+                            "algorithm",
+                            "chronological_split",
+                            "selected_k_by_target",
+                            "refit_episode_count",
+                            "truth_boundary",
+                        )
+                        if key in model
+                    },
+                    "limitations": payload.get("limitations", []),
+                }
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
 
     @app.post("/api/backtests/select")
     def select_backtest():

@@ -39,17 +39,19 @@ These are historical-demand replays, not reconstructions of actual airport decis
 
 Source fields and replay assumptions are classified as **Observed**, **Derived**, or **Modeled**. Flights, runways, gates, events, and turnarounds carry stable record IDs and connect through `SOURCED_FROM` or `MODELED_BY` to `SourceRecord` evidence. Mixed records have field-level boundaries in [Data provenance](docs/data-provenance.md), and all counterfactual improvements are described as projected under the replay assumptions. The default ORD scenario has exact selected BTS, NOAA, and FAA rows in the [public evidence pack](data/public/README.md), with pinned hashes and reproducible extraction instructions. The ATL and SFO packages record source URLs, row keys, observed/modeled field lists, and source-file digests, but their selected raw rows are not checked into that evidence pack.
 
-## Factual ORD shadow test
+## Factual ORD shadow test and multi-day benchmark
 
 GroundGraph also includes a separate 24-hour factual backtest for **ORD on July 27, 2026**. It uses 2,164 public BTS scheduled segments and realized outcomes plus 53 archived KORD METAR observations. July 2026 was the latest complete public BTS monthly delay archive available when the pack was built, so this is a reproducible historical day rather than a replication of yesterday.
 
-Every hour, six specialists execute fixed allowlisted Cypher reads for weather, demand, arrivals, departures, matured disruptions, and forecast memory. Their `AgentRun → Finding → Handoff` records are persisted in FalkorDB and re-read by the coordinator. Local Qwen may then choose only among three saved next-hour aggregate forecasts: schedule baseline, recent observed flow, and weather stress.
+Every hour, six specialists execute fixed allowlisted Cypher reads for weather, demand, arrivals, departures, matured disruptions, and forecast memory. Their `AgentRun → Finding → Handoff` records are persisted in FalkorDB and re-read by the coordinator. The runtime saves four next-hour aggregate forecasts for comparison: schedule baseline, recent observed flow, weather stress, and a frozen June-trained historical analogue. The historical analogue supplies the numerical default; local Qwen can verify its exact allowlisted ID and explain it, but cannot alter its values or invent a forecast.
 
-Schedule is available from the start, METARs arrive at their observation times, and operated outcomes enter agent state only at their recorded actual event times. Cancellation, diversion, and post-midnight labels remain sealed from agents; the evaluator uses them only for aggregate end-of-day settlement, after the final forecast. The mode reports an unweighted average of hourly cohort-mean delay errors plus cancellation, disruption, and delay-band metrics. Its schedule baseline assumes zero mean delay and ignores weather and recent flow. This one selected day validates the time-gated pipeline; it is not a held-out generalization test, a causal intervention, or a saved-minutes claim.
+Schedule is available from the start, METARs arrive at their observation times, and a movement timestamp and endpoint delay enter agent state only when the recorded ORD timestamp has passed. Eventual cancellation and diversion flags never enter live features; those flags and unresolved post-midnight labels remain sealed until aggregate end-of-day settlement, after the final forecast. The mode reports hourly cohort-mean delay error plus cancellation, disruption, and delay-band metrics. Its schedule baseline assumes zero mean delay and ignores weather and recent flow.
+
+A separate chronological benchmark evaluates **every reconstructable ORD day from July 2–31**: 30 days, 638 scored hourly windows, and 54,774 target movements across 10 normal, 12 elevated, and 8 severe days. A historical-analogue candidate calibrated and validated on June achieves 19.07-minute delay MAE, 3.96-percentage-point cancellation MAE, and 9.42-percentage-point disruption MAE; the schedule-only baseline's delay MAE is 34.92 minutes. July labels do not enter parameter fitting, scaling, validation loss, or neighbor selection, although feature and model-family design followed inspection of the July 27 showcase. The batch evaluator is graph-free for speed, while the selected-day runtime separately proves FalkorDB persistence and agent coordination.
 
 The API reports this boundary explicitly: `agent_future_outcomes_visible` remains `false`, raw sealed archive rows are never returned, and `archive_aggregate_visible` becomes `true` only at 24:00 when the evaluator produces aggregate scoring.
 
-The backtest uses a dedicated graph that is cleared and rebuilt when the runtime loads. Its source pack is reproducible, but in-progress backtest state is not claimed to persist across application restarts. See [ORD real-day factual shadow test](docs/real-day-backtest.md) for the complete truth boundary, graph flow, scoring rules, and API.
+The backtest uses a dedicated graph that is cleared and rebuilt when the runtime loads. Its source packs are reproducible, but in-progress backtest state is not claimed to persist across application restarts. Neither evaluation is a causal intervention or saved-minutes claim. See [ORD real-day factual shadow test](docs/real-day-backtest.md) for the runtime boundary and [ORD multi-day factual benchmark](docs/multiday-benchmark.md) for the cohort, chronological split, full result tables, model audit, and limitations.
 
 ## Why FalkorDB is essential
 
@@ -192,6 +194,7 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 | `data/provenance.json` | Machine-readable source and assumption contract for the default ORD evidence pack. |
 | `data/public/` | Minimal ORD public-source extracts and the hash-verifying reproduction tool. |
 | `data/backtests/` | Reproducible historical backtest packs with separated schedule, time-gated weather, sealed ground truth, and source manifests. |
+| `analysis/ord-july-2026-benchmark/` | Machine-readable 30-day benchmark, per-day metrics, hourly results, and independent weather-source check. |
 | `knowledge/` | Versioned synthetic SOP, incident, shift handoff, teams, roles, and import manifest. |
 | `cypher/` | Essential track-defining graph queries. |
 | `docs/` | Architecture, graph model, setup, track evidence, demo, disclosure, and checklist. |
@@ -203,6 +206,7 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 - [Graph model](docs/graph-model.md)
 - [Data provenance](docs/data-provenance.md)
 - [ORD real-day factual shadow test](docs/real-day-backtest.md)
+- [ORD multi-day factual benchmark](docs/multiday-benchmark.md)
 - [AI use disclosure](docs/ai-disclosure.md)
 - [Judge demo script](docs/demo-script.md)
 - [Submission copy](docs/submission-copy.md)

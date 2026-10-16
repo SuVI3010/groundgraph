@@ -41,7 +41,7 @@ const ui = {
   brainBusy: false,
   realStoryPhase: "known",
   backtests: {
-    runs: [], active: null, results: null, selectedId: null,
+    runs: [], active: null, results: null, benchmark: null, selectedId: null,
     busy: false, visualHour: 0, targetHour: 0, playProgress: 0,
   },
 };
@@ -220,7 +220,7 @@ function normalizeBacktestCatalog(payload) {
   const root = obj(payload); const data = obj(root.data);
   const runs = list(first(root.backtests, root.runs, root.available, root.items, data.backtests, data.runs, Array.isArray(payload) ? payload : []));
   let active = obj(first(root.snapshot, data.snapshot, root.active, data.active, root.current, root.state, root.replay, root.selected));
-  const selectedId = String(first(root.active_backtest_id, root.active_id, root.selected_id, backtestRunId(active), backtestRunId(root.selected), runs.find((run) => run.active || run.selected)?.id, ui.backtests.selectedId, ""));
+  const selectedId = String(first(root.active_backtest_id, root.active_id, root.selected_id, backtestRunId(active), backtestRunId(root.selected), runs.find((run) => run.active || run.selected)?.id, ui.backtests.selectedId, root.default_backtest_id, ""));
   return { runs, active, selectedId };
 }
 
@@ -340,6 +340,9 @@ function renderRealDay({ advanceStory = false } = {}) {
   if (!isRealDayMode()) return;
   const active = obj(ui.backtests.active); const state = backtestState(active); const meta = backtestMeta(active); const hour = backtestHour(active);
   const episode = displayBacktestEpisode(); const known = backtestData("known"); const forecast = backtestData("forecast"); const truth = backtestData("truth"); const scores = backtestScoreSummary();
+  const benchmark = obj(ui.backtests.benchmark); const benchmarkEvaluation = obj(benchmark.evaluation); const benchmarkMetrics = obj(benchmark.metrics);
+  const analogOverall = obj(obj(benchmarkMetrics.HISTORICAL_ANALOG).overall); const benchmarkBaseline = obj(obj(benchmarkMetrics.SCHEDULE_BASELINE).overall);
+  const benchmarkReady = Number.isFinite(Number(analogOverall.delay_mae_minutes)) && Number.isFinite(Number(benchmarkBaseline.delay_mae_minutes));
   const input = obj(episode.input); const evaluation = obj(episode.evaluation); const truthScope = String(evaluation.truth_scope || "SEALED").toUpperCase();
   const evaluationStatus = String(evaluation.status || "").toUpperCase();
   const archiveSettled = truthScope === "END_OF_DAY_ARCHIVE_SETTLEMENT"; const timeGatedReveal = truthScope === "TIME_GATED_AGENT_VISIBLE_OUTCOMES";
@@ -401,7 +404,12 @@ function renderRealDay({ advanceStory = false } = {}) {
   const candidates = list(episode.candidates); const handoffs = list(episode.handoffs); const selectedCandidateId = String(first(forecastObject.candidate_id, forecastObject.id, ""));
   $("real-decision-explain").hidden = !hasForecast;
   if (hasForecast) {
-    $("real-choice-title").textContent = `${first(forecastObject.selected_by, "Coordinator").toString().toLowerCase() === "local_model" ? "Local Qwen" : "Safe coordinator"} chose ${first(forecastObject.label, humanize(forecastObject.method), "this forecast")} from ${candidates.length || list(forecastObject.allowlisted_candidate_ids).length || 1} allowed options`;
+    const isHistoricalAnalog = String(forecastObject.method || "").toUpperCase() === "HISTORICAL_ANALOG";
+    const qwenVerified = String(forecastObject.selected_by || "").toLowerCase() === "local_model";
+    const forecastLabel = first(forecastObject.label, humanize(forecastObject.method), "this forecast");
+    $("real-choice-title").textContent = isHistoricalAnalog
+      ? `${qwenVerified ? "Local Qwen verified" : "Historical model selected"} ${forecastLabel}; ${candidates.length || 1} numerical cases were saved for comparison`
+      : `${qwenVerified ? "Local Qwen" : "Safe coordinator"} chose ${forecastLabel} from ${list(forecastObject.allowlisted_candidate_ids).length || 1} allowed options`;
     const modelReason = first(forecastObject.selection_summary, "The coordinator returned an allowlisted candidate ID."); const candidateAssumption = first(forecastObject.explanation, "The candidate was saved before ground truth became visible.");
     $("real-choice-copy").textContent = `${modelReason} Candidate assumption: ${candidateAssumption}`;
     $("real-candidates").innerHTML = candidates.map((candidate) => {
@@ -425,10 +433,13 @@ function renderRealDay({ advanceStory = false } = {}) {
   const modelLeads = Number.isFinite(Number(modelError)) && Number.isFinite(Number(baselineError)) && Number(modelError) < Number(baselineError);
   const cancelError = first(scores.mean_cancel_rate_abs_error_pp, scores.cancel_rate_mae_pp); const disruptionError = first(scores.mean_disruption_rate_abs_error_pp, scores.disruption_rate_mae_pp); const bandAccuracy = scores.delay_band_accuracy_pct;
   const scoredTargets = first(scores.scored_target_movements, scores.target_movements_scored); const delayBearing = first(scores.delay_bearing_outcomes, scores.observed_delay_outcomes); const unavailableDelay = first(scores.unavailable_delay_outcomes, scores.unavailable_endpoint_delay_outcomes); const cancelledOutcomes = scores.cancelled_outcomes;
-  $("real-score-title").textContent = hasScores ? "Descriptive accuracy on settled hourly cohorts" : "Scoring opens after ground truth";
-  $("real-score-copy").textContent = hasScores ? `One selected day, not held out. Mean-delay MAE is the unweighted average of ${metricText(hoursScored)} hourly cohort-mean errors${delayBearing !== undefined && scoredTargets !== undefined ? `, using ${metricText(delayBearing)} delay-bearing records from ${metricText(scoredTargets)} target movements` : ""}; ${cancelledOutcomes !== undefined ? `${metricText(cancelledOutcomes)} cancellations and ` : "cancellations and "}${unavailableDelay !== undefined ? `${metricText(unavailableDelay)} unavailable endpoint delays` : "unavailable endpoint delays"} are excluded. This validates the time-gated pipeline, not generalization or isolated model lift.` : "The forecasts and schedule-only zero-delay baseline are scored on the same forecast windows after recorded outcomes are revealed.";
+  $("real-score-title").textContent = hasScores ? "This replay, backed by a 30-day benchmark" : benchmarkReady ? "30-day chronological benchmark" : "Scoring opens after ground truth";
+  $("real-score-copy").textContent = hasScores ? `This selected day is the interactive pipeline audit. Its mean-delay MAE averages ${metricText(hoursScored)} settled hourly cohort errors${delayBearing !== undefined && scoredTargets !== undefined ? ` across ${metricText(delayBearing)} delay-bearing records from ${metricText(scoredTargets)} targets` : ""}. The larger benchmark below measures a June-trained numerical candidate across every reconstructable July day.` : benchmarkReady ? "The numerical forecast was fit on June, then evaluated across normal, elevated, and severe July operations. July outcomes never entered fitting or tuning." : "The forecasts and schedule-only zero-delay baseline are scored on the same forecast windows after recorded outcomes are revealed.";
   $("real-score-status").textContent = hasScores ? (backtestIsComplete(active) ? "FINAL" : "CUMULATIVE") : "WAITING";
-  $("real-scoreboard").innerHTML = hasScores ? `<article class="score-card ${modelLeads ? "leading" : ""}"><small>Agent hourly mean-delay MAE</small><strong>${escapeHtml(metricText(modelError, " min"))}</strong><em>unweighted cohort means</em></article><article class="score-card ${modelLeads ? "" : "leading"}"><small>Schedule zero-delay MAE</small><strong>${escapeHtml(metricText(baselineError, " min"))}</strong><em>same targets and outcomes</em></article><article class="score-card"><small>Settled forecast windows</small><strong>${escapeHtml(metricText(hoursScored))}</strong><em>complete hourly cohorts</em></article><article class="score-card"><small>Cancellation-rate MAE</small><strong>${escapeHtml(metricText(cancelError, " pp"))}</strong><em>agent forecast</em></article><article class="score-card"><small>Disruption-rate MAE</small><strong>${escapeHtml(metricText(disruptionError, " pp"))}</strong><em>agent forecast</em></article><article class="score-card"><small>Delay-band accuracy</small><strong>${escapeHtml(metricText(bandAccuracy, "%"))}</strong><em>agent forecast</em></article>` : '<div class="real-seal"><b>NO SCORE YET</b><small>A score appears only after forecast → truth reveal.</small></div>';
+  const currentDayScore = hasScores ? `<div class="selected-day-score"><small>SELECTED DAY</small><div><article class="score-card ${modelLeads ? "leading" : ""}"><small>Agent delay MAE</small><strong>${escapeHtml(metricText(modelError, " min"))}</strong><em>hourly cohort means</em></article><article class="score-card ${modelLeads ? "" : "leading"}"><small>Schedule-only MAE</small><strong>${escapeHtml(metricText(baselineError, " min"))}</strong><em>same settled targets</em></article><article class="score-card"><small>Hours scored</small><strong>${escapeHtml(metricText(hoursScored))}</strong><em>complete windows</em></article><article class="score-card"><small>Cancel error</small><strong>${escapeHtml(metricText(cancelError, " pp"))}</strong><em>absolute rate error</em></article><article class="score-card"><small>Disruption error</small><strong>${escapeHtml(metricText(disruptionError, " pp"))}</strong><em>absolute rate error</em></article><article class="score-card"><small>Delay-band accuracy</small><strong>${escapeHtml(metricText(bandAccuracy, "%"))}</strong><em>agent forecast</em></article></div></div>` : benchmarkReady ? "" : '<div class="real-seal"><b>THIS DAY IS NOT SCORED YET</b><small>Advance the replay to commit forecasts and reveal outcomes.</small></div>';
+  const classCounts = obj(benchmarkEvaluation.class_counts); const analogDelay = number(analogOverall.delay_mae_minutes); const baselineDelay = number(benchmarkBaseline.delay_mae_minutes); const delayLift = baselineDelay > 0 ? 100 * (baselineDelay - analogDelay) / baselineDelay : 0;
+  const monthProof = benchmarkReady ? `<article class="month-proof"><header><div><small>30-DAY OUT-OF-MONTH CHECK</small><strong>Every July 2–31 operating day</strong></div><span>${escapeHtml(metricText(benchmarkEvaluation.window_count))} hourly forecasts</span></header><div class="month-proof-result"><div><small>June-trained historical analogue</small><strong>${escapeHtml(metricText(analogDelay, " min"))}</strong><em>delay MAE · ${escapeHtml(metricText(delayLift, "%"))} below schedule-only</em></div><div class="benchmark-bars" aria-label="Delay error comparison"><span><i style="--bar:100%"></i><b>Schedule-only</b><em>${escapeHtml(metricText(baselineDelay, " min"))}</em></span><span class="winner"><i style="--bar:${escapeHtml(metricText(Math.min(100, analogDelay / baselineDelay * 100), "%"))}"></i><b>Historical analogue</b><em>${escapeHtml(metricText(analogDelay, " min"))}</em></span></div></div><div class="month-proof-metrics"><span><strong>${escapeHtml(metricText(analogOverall.cancel_rate_mae_pp, " pp"))}</strong><small>cancellation error</small></span><span><strong>${escapeHtml(metricText(analogOverall.disruption_rate_mae_pp, " pp"))}</strong><small>disruption error</small></span><span><strong>${escapeHtml(metricText(analogOverall.delay_band_accuracy_pct, "%"))}</strong><small>delay-band accuracy</small></span><span><strong>${escapeHtml(metricText(benchmarkEvaluation.day_count))} days</strong><small>${escapeHtml(metricText(classCounts.NORMAL))} normal · ${escapeHtml(metricText(classCounts.ELEVATED))} elevated · ${escapeHtml(metricText(classCounts.SEVERE))} severe</small></span></div><footer>The historical model makes the numerical forecast. Qwen verifies and explains it without seeing future outcomes.</footer></article>` : "";
+  $("real-scoreboard").innerHTML = `${currentDayScore}${monthProof}`;
 
   const latestPhase = hasScores ? "score" : hasTruth ? "truth" : hasForecast ? "forecast" : "known";
   document.querySelectorAll("#stage-rail > [data-real-phase]").forEach((step) => {
@@ -458,6 +469,11 @@ async function loadBacktestResults() {
   catch (error) { if (![404, 409, 422].includes(number(error?.status))) throw error; }
 }
 
+async function loadBacktestBenchmark() {
+  try { ui.backtests.benchmark = obj(await request("/api/backtests/benchmark", { timeout: 20000 })); }
+  catch (_error) { ui.backtests.benchmark = null; }
+}
+
 function handleBacktestFailure(error, fallbackMessage) {
   setPlaying(false);
   const status = number(error?.status, NaN); const serverOrNetworkFailure = !Number.isFinite(status) || status >= 500;
@@ -473,6 +489,7 @@ function handleBacktestFailure(error, fallbackMessage) {
 async function loadBacktests({ refreshActive = false } = {}) {
   setBacktestBusy(true);
   try {
+    await loadBacktestBenchmark();
     const payload = await request("/api/backtests", { timeout: 20000 }); absorbBacktestPayload(payload);
     const selectedId = first(ui.backtests.selectedId, backtestRunId(ui.backtests.runs[0]));
     if ((refreshActive || !Object.keys(obj(ui.backtests.active)).length) && ui.backtests.runs.length) {

@@ -319,7 +319,12 @@ def test_runner_time_gates_weather_truth_and_six_agent_handoffs(
     assert len(first["handoffs"]) == 6
     assert len({item["from_agent"] for item in first["handoffs"]}) == 6
     assert all(item["issued_minute"] == 0 for item in first["handoffs"])
-    assert len(first["candidates"]) == 3
+    assert len(first["candidates"]) == 4
+    assert first["forecast"]["method"] == "HISTORICAL_ANALOG"
+    assert len(first["forecast"]["comparison_candidate_ids"]) == 4
+    assert first["forecast"]["selection_mode"] == (
+        "NUMERICAL_DEFAULT_WITH_OPTIONAL_QWEN_VERIFICATION"
+    )
     assert first["forecast"]["candidate_id"] in first["forecast"]["allowlisted_candidate_ids"]
     assert initial["claims"]["counterfactual_saved_minutes"] is None
 

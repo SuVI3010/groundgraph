@@ -1,0 +1,169 @@
+{
+  "schema_version": "1.0",
+  "pack_id": "ord-2026-07-30",
+  "day_summary": "ORD's 2026-07-30 local scheduled-operation cohort contains 2,158 reporting-carrier domestic segments: 1,081 departures and 1,077 arrivals. The realized record includes 2 cancellations, 1 diversions, and 522 ORD endpoint delays of at least 15 minutes. Archived KORD METAR observations for the same local day remain available in weather.csv.",
+  "airport": {
+    "iata": "ORD",
+    "icao": "KORD",
+    "name": "Chicago O'Hare International Airport",
+    "timezone": "America/Chicago"
+  },
+  "replay_window": {
+    "service_date": "2026-07-30",
+    "local_start": "2026-07-30T00:00:00-05:00",
+    "local_end_exclusive": "2026-07-31T00:00:00-05:00",
+    "flight_selection": "Departures use Origin == ORD and BTS FlightDate == 2026-07-30. Arrivals use Dest == ORD and a resolved scheduled ORD arrival date of 2026-07-30, including prior-origin-date overnight flights and excluding flights scheduled to reach ORD on 2026-07-31.",
+    "arrival_date_derivation": "BTS does not publish a scheduled arrival date. The builder solves scheduled elapsed minutes = arrival clock - departure clock + day offset - (ORD UTC offset - origin UTC offset) against the valid U.S. domestic offset differences [-60, 0, 60, 120, 180, 240, 300] minutes. Every inbound candidate must produce exactly one day offset."
+  },
+  "truth_boundaries": {
+    "schedule": {
+      "agent_access": "available at replay start",
+      "rule": "Only the allowlisted columns in schedule.csv may be loaded before a prediction or recommendation. Tail identity and every realized outcome are excluded."
+    },
+    "weather": {
+      "agent_access": "event time only",
+      "rule": "Reveal an observation only when the replay clock is greater than or equal to observed_at_local."
+    },
+    "ground_truth": {
+      "agent_access": "evaluation only",
+      "rule": "Never expose ground_truth.csv to an agent before its prediction or recommendation is persisted. Delay causes are post-event labels.",
+      "known_absences": [
+        "cancellation decision timestamp",
+        "gate assignment history",
+        "baggage and turnaround task events",
+        "crew assignment and legality",
+        "passenger connections",
+        "maintenance state",
+        "counterfactual outcome under an alternative action"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "bts_reporting_carrier_on_time_performance",
+      "publisher": "U.S. Bureau of Transportation Statistics",
+      "download_url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2026_7.zip",
+      "metadata_url": "https://www.transtats.bts.gov/TableInfo.asp?QO_fu146_anzr=b0-gvzr&gnoyr_VQ=FGJ",
+      "source_filename": "groundgraph-bts-2026-07.zip",
+      "sha256": "61d657eb17f5b6f800ed2f05262a2223c5edf66fe7d9cfb3598c6664a34ed0b6",
+      "scope": "July 2026 reporting-carrier domestic nonstop flight records"
+    },
+    {
+      "id": "iem_asos_metar_archive",
+      "publisher": "Iowa Environmental Mesonet, Iowa State University",
+      "download_url": "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?network=IL_ASOS&station=ORD&data=all&year1=2026&month1=7&day1=1&year2=2026&month2=8&day2=1&tz=America%2FChicago&format=onlycomma&latlon=no&elev=no&missing=M&trace=T&direct=no&report_type=2",
+      "metadata_url": "https://mesonet.agron.iastate.edu/request/download.phtml?network=ALL_ASOS",
+      "source_filename": "kord-2026-07-month.csv",
+      "sha256": "45e59c39ef2ef8058794bf02dcc4e3679e58c8faf79435f1a6db637cbaf48152",
+      "scope": "KORD routine and special METAR observations requested in local time"
+    }
+  ],
+  "files": {
+    "schedule": {
+      "path": "schedule.csv",
+      "row_count": 2158,
+      "sha256": "c9e9a44b8058beb7742df242e9c8e2d55fcf8c088ecbfe1af29161ab7bed8dbd",
+      "columns": [
+        "segment_id",
+        "flight_date",
+        "reporting_airline",
+        "flight_number",
+        "origin",
+        "destination",
+        "ord_movement",
+        "ord_scheduled_at_local",
+        "scheduled_departure_hhmm",
+        "scheduled_arrival_hhmm",
+        "scheduled_elapsed_minutes",
+        "distance_miles"
+      ]
+    },
+    "weather": {
+      "path": "weather.csv",
+      "row_count": 24,
+      "sha256": "a8b610f417913f1f2fb9cc4b7f61826573af718925be5b0bb1180acc18f981b4",
+      "columns": [
+        "observation_id",
+        "observed_at_local",
+        "station",
+        "temperature_f",
+        "dewpoint_f",
+        "relative_humidity_pct",
+        "wind_direction_deg",
+        "wind_speed_kt",
+        "wind_gust_kt",
+        "precipitation_1h_in",
+        "altimeter_in_hg",
+        "sea_level_pressure_mb",
+        "visibility_sm",
+        "weather_codes",
+        "sky_cover_1",
+        "sky_base_1_ft",
+        "sky_cover_2",
+        "sky_base_2_ft",
+        "sky_cover_3",
+        "sky_base_3_ft",
+        "sky_cover_4",
+        "sky_base_4_ft",
+        "raw_metar"
+      ]
+    },
+    "ground_truth": {
+      "path": "ground_truth.csv",
+      "row_count": 2158,
+      "sha256": "7a084069269474983f869757dbd76cea80def094fa0cf8931cfb201174871087",
+      "columns": [
+        "segment_id",
+        "tail_number",
+        "ord_actual_at_local",
+        "ord_delay_minutes",
+        "ord_delayed_15",
+        "actual_departure_hhmm",
+        "departure_delay_minutes",
+        "departure_delayed_15",
+        "taxi_out_minutes",
+        "wheels_off_hhmm",
+        "wheels_on_hhmm",
+        "taxi_in_minutes",
+        "actual_arrival_hhmm",
+        "arrival_delay_minutes",
+        "arrival_delayed_15",
+        "cancelled",
+        "cancellation_code",
+        "diverted",
+        "actual_elapsed_minutes",
+        "air_time_minutes",
+        "carrier_delay_minutes",
+        "weather_delay_minutes",
+        "nas_delay_minutes",
+        "security_delay_minutes",
+        "late_aircraft_delay_minutes",
+        "diverted_airport_landings",
+        "diverted_reached_destination"
+      ]
+    }
+  },
+  "counts": {
+    "scheduled_segments": 2158,
+    "ord_departures": 1081,
+    "ord_arrivals": 1077,
+    "weather_observations": 24,
+    "cancelled_segments": 2,
+    "diverted_segments": 1,
+    "ord_departure_delays_15_or_more": 266,
+    "ord_arrival_delays_15_or_more": 256,
+    "positive_departure_delay_minutes": 20272,
+    "positive_arrival_delay_minutes": 20634
+  },
+  "coverage_notes": [
+    "BTS covers reportable U.S. domestic nonstop operations, not every ORD movement.",
+    "FlightDate is the scheduled origin service date; the builder resolves the ORD scheduled arrival date and requires a unique valid offset solution.",
+    "IEM distributes the archived observations as-is and notes that only limited quality control is applied.",
+    "A historical replay can score predictions against realized outcomes but cannot observe the outcome of an action that was not taken."
+  ],
+  "benchmark_cohort": {
+    "name": "ORD July 2026 full evaluable day cohort",
+    "selection_rule": "Every July 2-31, 2026 local day. July 1 is excluded because its prior-day overnight arrivals require prior-month source rows.",
+    "day_selected_without_outcome_filter": true
+  }
+}

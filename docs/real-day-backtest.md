@@ -1,12 +1,12 @@
 # ORD real-day factual shadow test
 
-GroundGraph includes a separate factual shadow test for Chicago O'Hare on **July 27, 2026, 00:00–24:00 local time**. It asks a narrow, measurable question: using only information available at each replay watermark, how closely can the agent system forecast the next hour's recorded operating outcome?
+GroundGraph's interactive factual shadow test replays Chicago O'Hare on **July 27, 2026, 00:00–24:00 local time**. It asks a narrow, measurable question: using only information available at each replay watermark, how closely can the agent system forecast the next hour's recorded operating outcome? The same forecast logic is also evaluated across every reconstructable July 2–31 day in the [30-day benchmark](multiday-benchmark.md).
 
 This mode does not replay the synthetic recovery actions used by the main ORD, ATL, and SFO demonstration. It saves forecasts, compares them with public observed outcomes, and reports forecast error. It does not claim that GroundGraph changed the historical day.
 
 ## Why this date is not yesterday
 
-Airline on-time performance is published as a delayed monthly archive. When this pack was built, **July 2026 was the latest complete public BTS month with the delay and cancellation fields needed for ground truth**. The test therefore uses July 27 rather than yesterday. It is a reproducible historical evaluation, not a live feed.
+Airline on-time performance is published as a delayed monthly archive. When these packs were built, **July 2026 was the latest complete public BTS month with the delay and cancellation fields needed for ground truth**. The interactive replay therefore uses July 27 rather than yesterday. It is a reproducible historical evaluation, not a live feed.
 
 The checked-in pack covers the strict ORD local calendar day and contains:
 
@@ -28,7 +28,7 @@ The runtime keeps observed facts and model output distinct:
 |---|---|---|
 | **Observed input** | Published schedule identity and time | At replay start. |
 | **Observed input** | Archived KORD METAR | Only when the replay clock reaches `observed_at_local`. |
-| **Observed outcome in agent state** | Actual ORD event time and endpoint delay for an operated, non-diverted movement | Only when the replay clock reaches that actual event time. |
+| **Observed outcome in agent state** | Actual ORD event time and endpoint delay when an ORD timestamp exists | Only when the replay clock reaches that actual event time. Eventual cancellation and diversion fields are removed from this record. |
 | **Evaluator-only observed outcome** | Cancellation, diversion, an event after local midnight, and other unresolved archive labels | Used only in the sealed end-of-day settlement after the 24-hour replay. These rows do not enter agent state. |
 | **Derived evidence** | Weather hazard score, specialist finding, and handoff summary | Computed from the time-gated graph view and labeled as derived. |
 | **Model forecast** | Next-hour cancellation rate, disruption rate, mean delay, and delay band | Saved before any later outcome is evaluated. |
@@ -52,15 +52,16 @@ At each hour the runtime excludes any movement whose outcome is already known, t
 
 Each read becomes a persisted `AgentRun → Finding → Handoff` chain with its query name, input hash, timestamps, and evidence IDs. The coordinator then re-reads the six persisted handoffs from FalkorDB. It fails the episode if all six are not present, making the graph the coordination boundary rather than an interface-only visualization.
 
-The server constructs three transparent aggregate forecasts:
+The server constructs and persists four transparent aggregate forecasts:
 
 1. `SCHEDULE_BASELINE` assumes no material delay or cancellation beyond a small disruption baseline.
 2. `RECENT_FLOW` carries forward only outcomes that actually matured during the trailing hour.
 3. `WEATHER_STRESS` adds pressure from the latest time-gated METAR hazard score.
+4. `HISTORICAL_ANALOG` applies a frozen model trained on June to 20 time-gated features covering demand, weather, recently completed flow, and overdue backlog.
 
-Local `qwen3:4b-instruct` receives the time-gated context, six handoff summaries, and exactly those three candidate IDs. It can select one supplied ID and give a short reason; it cannot invent a fourth forecast or an operational action. Unknown, malformed, or unavailable model output uses a labeled deterministic fallback. The chosen allowlist and decision source are stored in `ModelRun` and linked to the saved `Forecast`.
+The June-trained historical analogue is the numerical default because it produced the lowest error in the 30-day benchmark. Local `qwen3:4b-instruct` receives that single preselected, allowlisted candidate with the time-gated context and six handoff summaries. It verifies the exact supplied ID and gives a short explanation; it cannot change the numbers, invent a forecast, or propose an operational action. Unknown, malformed, or unavailable model output leaves the same historical-analogue forecast selected and records a labeled explanation fallback. `ModelRun` stores the one-candidate model allowlist, all four comparison IDs, and the decision source before linking to the saved `Forecast`.
 
-During the day, a forecast can be compared only with operated outcomes whose actual event time has passed. At 24:00 the evaluator settles remaining saved forecasts from the sealed archive. Complete windows receive cancellation-rate, disruption-rate, mean-delay, and delay-band accuracy metrics. Hours with no unresolved target movements are marked `SKIPPED` and excluded from accuracy averages.
+During the day, a forecast can be compared only with timestamp-revealed movement records whose actual event time has passed, with final status fields still removed. At 24:00 the evaluator settles remaining saved forecasts from the sealed archive. Complete windows receive cancellation-rate, disruption-rate, mean-delay, and delay-band accuracy metrics. Hours with no unresolved target movements are marked `SKIPPED` and excluded from accuracy averages.
 
 ## What the score proves
 
@@ -68,7 +69,20 @@ The result measures how closely a saved forecast matched the recorded BTS outcom
 
 The comparison baseline is deliberately simple: it assumes zero mean delay, zero cancellations, and a 5% disruption rate from the published schedule. It is scored on the same hourly targets and recorded outcomes, but it does not consume weather or recent-flow observations. Beating this baseline shows that the time-gated forecasts improve on a no-disruption schedule assumption; it is not evidence against a competitive forecasting system.
 
-This is one retrospectively selected severe-weather day with hand-set candidate formulas, not a preregistered or held-out evaluation. It validates the data boundary, graph coordination, model-selection path, and scoring pipeline. It does not establish predictive generalization or isolate the local model's incremental lift. Additional unseen dates are required for either claim.
+July 27 is a retrospectively selected severe-weather stress day. By itself, it validates the data boundary, graph coordination, model-selection path, and scoring pipeline; it is not a generalization result and does not isolate the local model's incremental lift.
+
+The checked official-server replay settles 21 scoreable hourly windows covering 1,996 target movements. It persists 24 forecast episodes and 144 specialist handoffs. The result agrees with the batch evaluator:
+
+| July 27 metric | Historical analogue | Schedule-only baseline |
+|---|---:|---:|
+| Hourly cohort-mean delay MAE | 76.96 min | 162.53 min |
+| Cancellation-rate MAE | 26.01 pp | 36.27 pp |
+| Disruption-rate MAE | 10.42 pp | 62.74 pp |
+| Delay-band accuracy | 61.90% | 19.05% |
+
+The analogue cuts delay MAE by 52.65% against that simple baseline, but a 76.96-minute error is still large. This is the benchmark's hardest July date, so the selected-day result demonstrates graceful operation under an extreme case rather than solved severe-day forecasting.
+
+The accompanying [multi-day benchmark](multiday-benchmark.md) addresses day-selection bias by scoring every reconstructable July 2–31 date. It contains 30 days, 638 hourly windows, and 54,774 target movements. Its June-trained historical-analogue candidate records 19.07-minute delay MAE, 3.96-percentage-point cancellation MAE, and 9.42-percentage-point disruption MAE, compared with 34.92-minute delay MAE for the schedule-only baseline. The larger result remains a one-airport, adjacent-month retrospective evaluation rather than a preregistered external study.
 
 It does **not** establish that an agent action caused an improvement. The archive contains only the outcome that occurred; it does not contain the counterfactual outcome under an action that was never taken. This mode reports no saved-minutes or historical intervention claim.
 

@@ -261,7 +261,9 @@ def signed_minutes(value: str | None) -> int | None:
     return int(number)
 
 
-def read_bts_rows(path: Path) -> list[dict[str, str]]:
+def read_bts_rows(
+    path: Path, *, service_date: date = SERVICE_DATE
+) -> list[dict[str, str]]:
     selected: list[dict[str, str]] = []
     with zipfile.ZipFile(path) as archive:
         members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
@@ -308,19 +310,19 @@ def read_bts_rows(path: Path) -> list[dict[str, str]]:
             missing = required.difference(reader.fieldnames or [])
             if missing:
                 raise ValueError(f"BTS CSV lacks required fields: {sorted(missing)}")
-            previous_date = (SERVICE_DATE - timedelta(days=1)).isoformat()
+            previous_date = (service_date - timedelta(days=1)).isoformat()
             for source_index, row in enumerate(reader):
                 if row["Origin"] == AIRPORT_IATA:
-                    if row["FlightDate"] != SERVICE_DATE.isoformat():
+                    if row["FlightDate"] != service_date.isoformat():
                         continue
-                    ord_date = SERVICE_DATE
+                    ord_date = service_date
                     day_offset = 0
                 elif row["Dest"] == AIRPORT_IATA and row["FlightDate"] in {
                     previous_date,
-                    SERVICE_DATE.isoformat(),
+                    service_date.isoformat(),
                 }:
                     ord_date, day_offset = scheduled_arrival_date(row)
-                    if ord_date != SERVICE_DATE:
+                    if ord_date != service_date:
                         continue
                 else:
                     continue
@@ -335,6 +337,8 @@ def read_bts_rows(path: Path) -> list[dict[str, str]]:
 
 def build_flight_rows(
     source_rows: list[dict[str, str]],
+    *,
+    service_date: date = SERVICE_DATE,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     def safe_sort_key(row: dict[str, str]) -> tuple[object, ...]:
         movement = "departure" if row["Origin"] == AIRPORT_IATA else "arrival"
@@ -358,7 +362,7 @@ def build_flight_rows(
     schedule_rows: list[dict[str, str]] = []
     truth_rows: list[dict[str, str]] = []
     for index, row in enumerate(sorted(source_rows, key=safe_sort_key), start=1):
-        segment_id = f"ord-20260727-{index:04d}"
+        segment_id = f"ord-{service_date.strftime('%Y%m%d')}-{index:04d}"
         movement = "departure" if row["Origin"] == AIRPORT_IATA else "arrival"
         scheduled_source = (
             row["CRSDepTime"] if movement == "departure" else row["CRSArrTime"]
@@ -427,7 +431,9 @@ def build_flight_rows(
     return schedule_rows, truth_rows
 
 
-def build_weather_rows(path: Path) -> list[dict[str, str]]:
+def build_weather_rows(
+    path: Path, *, service_date: date = SERVICE_DATE
+) -> list[dict[str, str]]:
     rows: list[tuple[datetime, dict[str, str]]] = []
     with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -464,7 +470,7 @@ def build_weather_rows(path: Path) -> list[dict[str, str]]:
             observed = datetime.strptime(row["valid"], "%Y-%m-%d %H:%M").replace(
                 tzinfo=LOCAL_ZONE
             )
-            if observed.date() != SERVICE_DATE:
+            if observed.date() != service_date:
                 continue
             rows.append((observed, row))
     rows.sort(key=lambda item: item[0])
@@ -475,7 +481,7 @@ def build_weather_rows(path: Path) -> list[dict[str, str]]:
     for index, (observed, row) in enumerate(rows, start=1):
         result.append(
             {
-                "observation_id": f"kord-20260727-{index:04d}",
+                "observation_id": f"kord-{service_date.strftime('%Y%m%d')}-{index:04d}",
                 "observed_at_local": observed.isoformat(timespec="seconds"),
                 "station": row["station"],
                 "temperature_f": clean(row["tmpf"]),
@@ -516,9 +522,20 @@ def sum_positive_minutes(rows: list[dict[str, str]], field: str) -> int:
     return int(total)
 
 
-def build_outputs(bts_zip: Path, weather_csv: Path) -> dict[str, bytes]:
-    schedule_rows, truth_rows = build_flight_rows(read_bts_rows(bts_zip))
-    weather_rows = build_weather_rows(weather_csv)
+def build_outputs(
+    bts_zip: Path,
+    weather_csv: Path,
+    *,
+    service_date: date = SERVICE_DATE,
+    bts_source_url: str = BTS_SOURCE_URL,
+    weather_source_url: str = WEATHER_SOURCE_URL,
+) -> dict[str, bytes]:
+    schedule_rows, truth_rows = build_flight_rows(
+        read_bts_rows(bts_zip, service_date=service_date),
+        service_date=service_date,
+    )
+    weather_rows = build_weather_rows(weather_csv, service_date=service_date)
+    pack_id = f"ord-{service_date.isoformat()}"
 
     output = {
         "schedule.csv": csv_bytes(SCHEDULE_FIELDS, schedule_rows),
@@ -556,17 +573,16 @@ def build_outputs(bts_zip: Path, weather_csv: Path) -> dict[str, bytes]:
     ]
     manifest = {
         "schema_version": "1.0",
-        "pack_id": PACK_ID,
+        "pack_id": pack_id,
         "day_summary": (
-            f"ORD's {SERVICE_DATE.isoformat()} local scheduled-operation cohort contains "
+            f"ORD's {service_date.isoformat()} local scheduled-operation cohort contains "
             f"{len(schedule_rows):,} reporting-carrier domestic segments: "
             f"{len(departures):,} departures and {len(arrivals):,} arrivals. "
             f"The realized record includes {count_flag(truth_rows, 'cancelled'):,} "
             f"cancellations, {count_flag(truth_rows, 'diverted'):,} diversions, and "
             f"{count_flag(departures, 'ord_delayed_15') + count_flag(arrivals, 'ord_delayed_15'):,} "
-            "ORD endpoint delays of at least 15 minutes. Observed METARs show early "
-            "low visibility followed by two thunderstorm periods; the raw observations "
-            "remain available in weather.csv."
+            "ORD endpoint delays of at least 15 minutes. Archived KORD METAR observations "
+            "for the same local day remain available in weather.csv."
         ),
         "airport": {
             "iata": AIRPORT_IATA,
@@ -575,18 +591,18 @@ def build_outputs(bts_zip: Path, weather_csv: Path) -> dict[str, bytes]:
             "timezone": LOCAL_TIMEZONE,
         },
         "replay_window": {
-            "service_date": SERVICE_DATE.isoformat(),
+            "service_date": service_date.isoformat(),
             "local_start": datetime.combine(
-                SERVICE_DATE, datetime.min.time(), tzinfo=LOCAL_ZONE
+                service_date, datetime.min.time(), tzinfo=LOCAL_ZONE
             ).isoformat(timespec="seconds"),
             "local_end_exclusive": datetime.combine(
-                SERVICE_DATE + timedelta(days=1), datetime.min.time(), tzinfo=LOCAL_ZONE
+                service_date + timedelta(days=1), datetime.min.time(), tzinfo=LOCAL_ZONE
             ).isoformat(timespec="seconds"),
             "flight_selection": (
-                "Departures use Origin == ORD and BTS FlightDate == 2026-07-27. "
-                "Arrivals use Dest == ORD and a scheduled ORD arrival date of 2026-07-27, "
-                "including prior-origin-date overnight flights and excluding flights "
-                "scheduled to reach ORD on 2026-07-28."
+                f"Departures use Origin == ORD and BTS FlightDate == {service_date.isoformat()}. "
+                "Arrivals use Dest == ORD and a resolved scheduled ORD arrival date of "
+                f"{service_date.isoformat()}, including prior-origin-date overnight flights "
+                f"and excluding flights scheduled to reach ORD on {(service_date + timedelta(days=1)).isoformat()}."
             ),
             "arrival_date_derivation": (
                 "BTS does not publish a scheduled arrival date. The builder solves "
@@ -633,16 +649,19 @@ def build_outputs(bts_zip: Path, weather_csv: Path) -> dict[str, bytes]:
             {
                 "id": "bts_reporting_carrier_on_time_performance",
                 "publisher": "U.S. Bureau of Transportation Statistics",
-                "download_url": BTS_SOURCE_URL,
+                "download_url": bts_source_url,
                 "metadata_url": BTS_METADATA_URL,
                 "source_filename": bts_zip.name,
                 "sha256": digest_file(bts_zip),
-                "scope": "July 2026 reporting-carrier domestic nonstop flight records",
+                "scope": (
+                    f"{service_date.strftime('%B %Y')} reporting-carrier domestic nonstop "
+                    "flight records"
+                ),
             },
             {
                 "id": "iem_asos_metar_archive",
                 "publisher": "Iowa Environmental Mesonet, Iowa State University",
-                "download_url": WEATHER_SOURCE_URL,
+                "download_url": weather_source_url,
                 "metadata_url": WEATHER_METADATA_URL,
                 "source_filename": weather_csv.name,
                 "sha256": digest_file(weather_csv),

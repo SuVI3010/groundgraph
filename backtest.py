@@ -16,6 +16,7 @@ import csv
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -29,6 +30,40 @@ from engine import BASE_DIR, GraphBackend, GraphNotReadyError
 
 
 DEFAULT_BACKTEST_ROOT = BASE_DIR / "data" / "backtests"
+DEFAULT_HISTORICAL_ANALOG_MODEL = (
+    BASE_DIR / "data" / "models" / "ord-hourly-historical-analog-june-2026.json"
+)
+HISTORICAL_ANALOG_FEATURES = (
+    "hour_sin",
+    "hour_cos",
+    "weekday_sin",
+    "weekday_cos",
+    "target_count",
+    "arrival_share",
+    "weather_missing",
+    "weather_hazard",
+    "visibility_sm",
+    "wind_speed_kt",
+    "wind_gust_kt",
+    "precipitation_1h_in",
+    "recent_completion_count",
+    "recent_mean_delay",
+    "recent_disruption_rate",
+    "backlog_total",
+    "backlog_15",
+    "backlog_60",
+    "backlog_180",
+    "completion_to_demand_ratio",
+)
+HISTORICAL_ANALOG_TARGETS = (
+    "mean_delay_minutes",
+    "cancel_rate_pct",
+    "disruption_rate_pct",
+)
+HISTORICAL_ANALOG_MODEL_ID = "ord-hourly-historical-analog-june-2026"
+HISTORICAL_ANALOG_ALGORITHM = (
+    "standardized inverse-distance k-nearest-neighbors"
+)
 BACKTEST_AGENTS = (
     ("BT-AGENT-WEATHER", "Weather specialist"),
     ("BT-AGENT-DEMAND", "Demand specialist"),
@@ -120,6 +155,112 @@ def _delay_band(value: Any) -> str:
     if delay < 120:
         return "60_TO_119"
     return "120_PLUS"
+
+
+def _historical_analog_model(path: Path) -> dict[str, Any]:
+    """Load the frozen June model and reject incomplete or altered contracts."""
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Historical analog model is missing: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Historical analog model is not valid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError("Historical analog model must be a JSON object")
+    model = dict(payload)
+    if str(model.get("schema_version")) != "1.0":
+        raise ValueError("Historical analog model schema_version must be 1.0")
+    if str(model.get("model_id")) != HISTORICAL_ANALOG_MODEL_ID:
+        raise ValueError("Historical analog model_id is not the approved June model")
+    if str(model.get("algorithm")) != HISTORICAL_ANALOG_ALGORITHM:
+        raise ValueError("Historical analog algorithm contract changed")
+    if tuple(model.get("feature_names", ())) != HISTORICAL_ANALOG_FEATURES:
+        raise ValueError("Historical analog feature_names contract changed")
+    if tuple(model.get("target_fields", ())) != HISTORICAL_ANALOG_TARGETS:
+        raise ValueError("Historical analog target_fields contract changed")
+
+    standardizer = model.get("standardizer")
+    if not isinstance(standardizer, Mapping):
+        raise ValueError("Historical analog standardizer is missing")
+    means = standardizer.get("means")
+    scales = standardizer.get("scales")
+    if not isinstance(means, Mapping) or not isinstance(scales, Mapping):
+        raise ValueError("Historical analog standardizer means/scales are missing")
+    if set(means) != set(HISTORICAL_ANALOG_FEATURES) or set(scales) != set(
+        HISTORICAL_ANALOG_FEATURES
+    ):
+        raise ValueError("Historical analog standardizer fields changed")
+    for name in HISTORICAL_ANALOG_FEATURES:
+        mean = _optional_number(means.get(name))
+        scale = _optional_number(scales.get(name))
+        if mean is None or scale is None or not math.isfinite(mean) or not math.isfinite(scale):
+            raise ValueError(f"Historical analog standardizer is invalid for {name}")
+        if scale <= 0:
+            raise ValueError(f"Historical analog scale must be positive for {name}")
+
+    k_by_target = model.get("selected_k_by_target")
+    if not isinstance(k_by_target, Mapping) or set(k_by_target) != set(
+        HISTORICAL_ANALOG_TARGETS
+    ):
+        raise ValueError("Historical analog selected_k_by_target contract changed")
+    references = model.get("reference_examples")
+    if not isinstance(references, list) or not references:
+        raise ValueError("Historical analog reference_examples are missing")
+    if int(model.get("refit_episode_count", -1)) != len(references):
+        raise ValueError("Historical analog refit_episode_count does not match its examples")
+    for target in HISTORICAL_ANALOG_TARGETS:
+        k = k_by_target.get(target)
+        if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= len(references):
+            raise ValueError(f"Historical analog neighbor count is invalid for {target}")
+    reference_dates: set[str] = set()
+    for index, reference in enumerate(references):
+        if not isinstance(reference, Mapping):
+            raise ValueError(f"Historical analog reference {index} is not an object")
+        service_date = str(reference.get("service_date", ""))
+        try:
+            parsed_date = date.fromisoformat(service_date)
+        except ValueError as exc:
+            raise ValueError(
+                f"Historical analog reference {index} has an invalid service_date"
+            ) from exc
+        if parsed_date.year != 2026 or parsed_date.month != 6:
+            raise ValueError("Historical analog references must come only from June 2026")
+        reference_dates.add(service_date)
+        issued_minute = reference.get("issued_minute")
+        if (
+            isinstance(issued_minute, bool)
+            or not isinstance(issued_minute, int)
+            or not 0 <= issued_minute < DAY_MINUTES
+        ):
+            raise ValueError(
+                f"Historical analog reference {index} has an invalid issued_minute"
+            )
+        features = reference.get("features")
+        actual = reference.get("actual")
+        if not isinstance(features, Mapping) or set(features) != set(
+            HISTORICAL_ANALOG_FEATURES
+        ):
+            raise ValueError(f"Historical analog reference {index} features changed")
+        if not isinstance(actual, Mapping) or set(actual) != set(
+            HISTORICAL_ANALOG_TARGETS
+        ):
+            raise ValueError(f"Historical analog reference {index} targets changed")
+        for name in HISTORICAL_ANALOG_FEATURES:
+            value = _optional_number(features.get(name))
+            if value is None or not math.isfinite(value):
+                raise ValueError(
+                    f"Historical analog reference {index} has invalid feature {name}"
+                )
+        for target in HISTORICAL_ANALOG_TARGETS:
+            value = _optional_number(actual.get(target))
+            if value is None or not math.isfinite(value):
+                raise ValueError(
+                    f"Historical analog reference {index} has invalid target {target}"
+                )
+    if set(str(value) for value in model.get("refit_days", ())) != reference_dates:
+        raise ValueError("Historical analog refit_days do not match its references")
+    return model
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -220,7 +361,10 @@ def discover_backtests(root: Path | str | None = None) -> list[dict[str, Any]]:
                 "pack_id": pack_id,
                 "airport": airport,
                 "date": service_date or directory.name[-10:],
-                "label": str(manifest.get("label") or f"{airport} · real-day backtest"),
+                "label": str(
+                    manifest.get("label")
+                    or f"{airport} · {service_date or directory.name[-10:]} factual replay"
+                ),
                 "mode": "HISTORICAL_SHADOW_BACKTEST",
                 "window": "00:00–24:00 local",
                 "counts": public_counts,
@@ -333,16 +477,26 @@ class GroundTruthEvaluator:
             mature = (
                 item["actual_minute"] is not None
                 and item["actual_minute"] <= as_of_minute
-                and not item["cancelled"]
-                and not item["diverted"]
             )
             # BTS does not contain a cancellation-announcement timestamp.
-            # Cancellation and diversion resolutions therefore remain out of
-            # agent state and are used only by the evaluator's final archive
-            # settlement after the replay reaches 24:00.
+            # An actual ORD timestamp does establish that the movement itself
+            # was observable then. Eventual cancellation/diversion fields do
+            # not establish when those labels became known, so they are
+            # deliberately removed from the agent-visible record.
             if not mature:
                 continue
-            revealed.append({**item, "reveal_minute": as_of_minute})
+            revealed.append(
+                {
+                    "movement_id": movement_id,
+                    "direction": item["direction"],
+                    "actual_time_local": item["actual_time_local"],
+                    "actual_minute": item["actual_minute"],
+                    "reveal_minute": item["actual_minute"],
+                    "delay_minutes": item["delay_minutes"],
+                    "delay_band": _delay_band(item["delay_minutes"]),
+                    "source_kind": item["source_kind"],
+                }
+            )
         return revealed
 
     def aggregate_window(self, movement_ids: Iterable[str]) -> dict[str, Any]:
@@ -399,6 +553,7 @@ class HistoricalBacktestRuntime:
         graph_name: str | None = None,
         lite_path: Path | str | None = None,
         enable_llm: bool | None = None,
+        historical_analog_model_path: Path | str | None = None,
     ) -> None:
         self.pack_path = Path(pack_path).resolve()
         manifest_path = self.pack_path / "manifest.json"
@@ -433,6 +588,19 @@ class HistoricalBacktestRuntime:
             raise FileNotFoundError(f"Backtest file is missing: {truth_path}")
         self.truth_evaluator = GroundTruthEvaluator(
             truth_path, service_date=self.service_date, schedule=self.schedule
+        )
+        self.historical_analog_model_path = Path(
+            historical_analog_model_path
+            or os.getenv(
+                "GROUNDGRAPH_HISTORICAL_ANALOG_MODEL",
+                str(DEFAULT_HISTORICAL_ANALOG_MODEL),
+            )
+        ).resolve()
+        self.historical_analog_model = _historical_analog_model(
+            self.historical_analog_model_path
+        )
+        self.historical_analog_model_hash = _sha256(
+            self.historical_analog_model_path
         )
         self.dataset_hash = hashlib.sha256(
             "".join(
@@ -691,18 +859,19 @@ class HistoricalBacktestRuntime:
 
         outcome_rows = self.backend.query(
             "MATCH (o:ObservedOutcome) "
-            "RETURN o.movement_id, o.direction, o.delay_minutes, o.cancelled, "
-            "o.diverted, o.reveal_minute, o.actual_minute, o.delay_band"
+            "RETURN o.movement_id, o.direction, o.delay_minutes, "
+            "o.reveal_minute, o.actual_minute, o.delay_band, "
+            "o.cancelled IS NOT NULL, o.diverted IS NOT NULL"
         ).result_set
         graph_outcomes = {
             str(row[0]): (
                 str(row[1]),
                 _optional_number(row[2]),
-                _truthy(row[3]),
-                _truthy(row[4]),
-                int(row[5]),
-                int(row[6]) if row[6] is not None else None,
-                str(row[7]),
+                int(row[3]),
+                int(row[4]) if row[4] is not None else None,
+                str(row[5]),
+                bool(row[6]),
+                bool(row[7]),
             )
             for row in outcome_rows
         }
@@ -710,13 +879,13 @@ class HistoricalBacktestRuntime:
             movement_id: (
                 str(item["direction"]),
                 _optional_number(item.get("delay_minutes")),
-                bool(item["cancelled"]),
-                bool(item["diverted"]),
                 int(item["reveal_minute"]),
                 int(item["actual_minute"])
                 if item.get("actual_minute") is not None
                 else None,
                 str(item["delay_band"]),
+                False,
+                False,
             )
             for movement_id, item in self._revealed.items()
         }
@@ -835,11 +1004,11 @@ class HistoricalBacktestRuntime:
                 str(row[1]),
                 str(row[2]),
                 int(row[3]),
-                float(row[4]),
+                round(float(row[4]), 9),
                 int(row[5]),
-                float(row[6]),
+                round(float(row[6]), 9),
                 int(row[7]),
-                float(row[8]),
+                round(float(row[8]), 9),
                 str(row[9]),
                 str(row[10]),
                 str(row[11]),
@@ -851,11 +1020,11 @@ class HistoricalBacktestRuntime:
                 str(candidate["method"]),
                 str(candidate["label"]),
                 int(candidate["predicted_movements"]),
-                float(candidate["predicted_cancel_rate_pct"]),
+                round(float(candidate["predicted_cancel_rate_pct"]), 9),
                 int(candidate["predicted_cancelled_count"]),
-                float(candidate["predicted_disruption_rate_pct"]),
+                round(float(candidate["predicted_disruption_rate_pct"]), 9),
                 int(candidate["predicted_disrupted_count"]),
-                float(candidate["predicted_mean_delay_minutes"]),
+                round(float(candidate["predicted_mean_delay_minutes"]), 9),
                 str(candidate["predicted_delay_band"]),
                 str(candidate["explanation"]),
                 str(candidate["source_kind"]),
@@ -872,7 +1041,8 @@ class HistoricalBacktestRuntime:
         model_rows = self.backend.query(
             "MATCH (m:ModelRun) RETURN m.id, m.runtime_kind, m.provider, m.model, "
             "m.selected_candidate_id, m.allowlisted_candidate_ids, "
-            "m.coordinator_input_handoff_ids, m.decision_source, m.summary"
+            "m.comparison_candidate_ids, m.coordinator_input_handoff_ids, "
+            "m.decision_source, m.summary"
         ).result_set
         graph_models = {
             str(row[0]): (
@@ -882,20 +1052,24 @@ class HistoricalBacktestRuntime:
                 str(row[4]),
                 [str(item) for item in decoded_list(row[5])],
                 [str(item) for item in decoded_list(row[6])],
-                str(row[7]),
+                [str(item) for item in decoded_list(row[7])],
                 str(row[8]),
+                str(row[9]),
             )
             for row in model_rows
         }
         expected_models = {
             f"{item['id']}-MODEL": (
                 "HISTORICAL_SHADOW_BACKTEST",
-                "ollama" if item["forecast"]["selected_by"] == "local_model" else "deterministic",
+                "ollama"
+                if item["forecast"]["selected_by"] == "local_model"
+                else "frozen_artifact",
                 self.model
                 if item["forecast"]["selected_by"] == "local_model"
-                else "bounded-forecast-fallback",
+                else str(item["forecast"]["model_id"]),
                 str(item["forecast"]["candidate_id"]),
                 [str(value) for value in item["forecast"]["allowlisted_candidate_ids"]],
+                [str(value) for value in item["forecast"]["comparison_candidate_ids"]],
                 [str(value["id"]) for value in item["handoffs"]],
                 str(item["forecast"]["selected_by"]),
                 str(item["forecast"]["selection_summary"]),
@@ -1403,7 +1577,7 @@ class HistoricalBacktestRuntime:
                 "MATCH (o:ObservedOutcome) "
                 "WHERE o.reveal_minute > $recent_start AND o.reveal_minute <= $minute "
                 "RETURN o.id, o.movement_id, o.direction, o.delay_minutes, "
-                "o.cancelled, o.diverted, o.reveal_minute ORDER BY o.movement_id",
+                "o.reveal_minute ORDER BY o.movement_id",
                 {"recent_start": recent_start, "minute": issued_minute},
             ),
             "FORECAST_MEMORY": (
@@ -1527,9 +1701,7 @@ class HistoricalBacktestRuntime:
                 "movement_id": str(row[1]),
                 "direction": str(row[2]),
                 "delay_minutes": _optional_number(row[3]),
-                "cancelled": _truthy(row[4]),
-                "diverted": _truthy(row[5]),
-                "reveal_minute": int(row[6]),
+                "reveal_minute": int(row[4]),
             }
             for row in outcome_rows
         ]
@@ -1545,8 +1717,6 @@ class HistoricalBacktestRuntime:
             if (
                 actual["direction"] != str(expected["direction"])
                 or actual["delay_minutes"] != expected_delay
-                or actual["cancelled"] != bool(expected["cancelled"])
-                or actual["diverted"] != bool(expected["diverted"])
                 or actual["reveal_minute"] != int(expected["reveal_minute"])
             ):
                 raise GraphNotReadyError(
@@ -1557,9 +1727,7 @@ class HistoricalBacktestRuntime:
         disrupted_rows = [
             row
             for row in outcome_rows
-            if _truthy(row[4])
-            or _truthy(row[5])
-            or (_optional_number(row[3]) is not None and float(row[3]) >= 15)
+            if _optional_number(row[3]) is not None and float(row[3]) >= 15
         ]
         memory_rows = reads["FORECAST_MEMORY"]["rows"]
         expected_memory = {
@@ -1601,7 +1769,7 @@ class HistoricalBacktestRuntime:
             (
                 BACKTEST_AGENTS[4],
                 "MATURED_DISRUPTIONS",
-                f"{len(disrupted_rows)} of {len(outcome_rows)} newly matured movements were delayed at least 15 minutes, cancelled, or diverted.",
+                f"{len(disrupted_rows)} of {len(outcome_rows)} newly matured movements had at least 15 minutes of observable delay; final status labels remain sealed.",
                 [str(row[1]) for row in disrupted_rows[:30]],
             ),
             (
@@ -1721,10 +1889,149 @@ class HistoricalBacktestRuntime:
         self._handoffs.extend(coordinator_handoffs)
         return coordinator_handoffs, latest_weather, graph_recent
 
+    def _historical_analog_features(
+        self,
+        *,
+        issued_minute: int,
+        targets: list[dict[str, Any]],
+        latest_weather: Mapping[str, Any] | None,
+        recent: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        """Build the exact status-agnostic feature row used by batch scoring."""
+
+        hazard, _signals = self._weather_hazard(latest_weather)
+        recent_delays = [
+            float(item["delay_minutes"])
+            for item in recent
+            if item.get("delay_minutes") is not None
+        ]
+        recent_mean = (
+            sum(recent_delays) / len(recent_delays) if recent_delays else 0.0
+        )
+        recent_disruption_rate = (
+            100
+            * sum(
+                item.get("delay_minutes") is not None
+                and float(item["delay_minutes"]) >= 15
+                for item in recent
+            )
+            / len(recent)
+            if recent
+            else 0.0
+        )
+        unresolved = set(self.schedule) - set(self._revealed)
+        overdue = [
+            movement
+            for movement in self.schedule.values()
+            if int(movement["scheduled_minute"]) < issued_minute
+            and movement["movement_id"] in unresolved
+        ]
+        arrivals = sum(item["direction"] == "ARRIVAL" for item in targets)
+        observed = (
+            latest_weather.get("observed", {})
+            if latest_weather and isinstance(latest_weather.get("observed"), Mapping)
+            else {}
+        )
+        visibility = _optional_number(observed.get("visibility_sm"))
+        wind = _optional_number(observed.get("wind_speed_kt"))
+        gust = _optional_number(observed.get("wind_gust_kt"))
+        precipitation = _optional_number(observed.get("precipitation_1h_in"))
+        weekday = date.fromisoformat(self.service_date).weekday()
+        target_count = len(targets)
+        features = {
+            "hour_sin": math.sin(2 * math.pi * (issued_minute / 60) / 24),
+            "hour_cos": math.cos(2 * math.pi * (issued_minute / 60) / 24),
+            "weekday_sin": math.sin(2 * math.pi * weekday / 7),
+            "weekday_cos": math.cos(2 * math.pi * weekday / 7),
+            "target_count": float(target_count),
+            "arrival_share": arrivals / target_count if target_count else 0.0,
+            "weather_missing": 0.0 if latest_weather else 1.0,
+            "weather_hazard": float(hazard),
+            "visibility_sm": visibility if visibility is not None else 10.0,
+            "wind_speed_kt": wind or 0.0,
+            "wind_gust_kt": gust or 0.0,
+            "precipitation_1h_in": precipitation or 0.0,
+            "recent_completion_count": float(len(recent)),
+            "recent_mean_delay": float(recent_mean),
+            "recent_disruption_rate": float(recent_disruption_rate),
+            "backlog_total": float(len(overdue)),
+            "backlog_15": float(
+                sum(
+                    issued_minute - int(item["scheduled_minute"]) >= 15
+                    for item in overdue
+                )
+            ),
+            "backlog_60": float(
+                sum(
+                    issued_minute - int(item["scheduled_minute"]) >= 60
+                    for item in overdue
+                )
+            ),
+            "backlog_180": float(
+                sum(
+                    issued_minute - int(item["scheduled_minute"]) >= 180
+                    for item in overdue
+                )
+            ),
+            "completion_to_demand_ratio": len(recent) / max(1, target_count),
+        }
+        if tuple(features) != HISTORICAL_ANALOG_FEATURES:
+            raise RuntimeError("Historical analog runtime feature order changed")
+        return features
+
+    def _historical_analog_prediction(
+        self, features: Mapping[str, Any], *, target_count: int
+    ) -> dict[str, Any]:
+        """Run the frozen artifact with the same arithmetic as the batch predictor."""
+
+        model = self.historical_analog_model
+        standardizer = model["standardizer"]
+        means = standardizer["means"]
+        scales = standardizer["scales"]
+
+        def vector(values: Mapping[str, Any]) -> list[float]:
+            return [
+                (float(values[name]) - float(means[name])) / float(scales[name])
+                for name in HISTORICAL_ANALOG_FEATURES
+            ]
+
+        point = vector(features)
+        distances: list[tuple[float, Mapping[str, Any]]] = []
+        for reference in model["reference_examples"]:
+            other = vector(reference["features"])
+            distance = math.sqrt(
+                sum((left - right) ** 2 for left, right in zip(point, other))
+            )
+            distances.append((distance, reference))
+        distances.sort(key=lambda item: item[0])
+        predicted: dict[str, float] = {}
+        for target in HISTORICAL_ANALOG_TARGETS:
+            count = min(int(model["selected_k_by_target"][target]), len(distances))
+            neighbors = distances[:count]
+            weights = [1 / max(distance, 0.05) for distance, _item in neighbors]
+            predicted[target] = sum(
+                weight * float(neighbor["actual"][target])
+                for weight, (_distance, neighbor) in zip(weights, neighbors)
+            ) / sum(weights)
+        delay = predicted["mean_delay_minutes"]
+        return {
+            "method": "HISTORICAL_ANALOG",
+            "predicted_movements": int(target_count),
+            "predicted_cancel_rate_pct": max(
+                0.0, min(100.0, predicted["cancel_rate_pct"])
+            ),
+            "predicted_disruption_rate_pct": max(
+                0.0, min(100.0, predicted["disruption_rate_pct"])
+            ),
+            "predicted_mean_delay_minutes": delay,
+            "predicted_delay_band": _delay_band(delay),
+        }
+
     def _forecast_candidates(
         self,
         *,
         episode_id: str,
+        issued_minute: int,
         targets: list[dict[str, Any]],
         latest_weather: Mapping[str, Any] | None,
         recent: list[dict[str, Any]],
@@ -1734,21 +2041,17 @@ class HistoricalBacktestRuntime:
         recent_delays = [
             item["delay_minutes"]
             for item in recent
-            if not item["cancelled"] and item["delay_minutes"] is not None
+            if item["delay_minutes"] is not None
         ]
         recent_mean = sum(recent_delays) / len(recent_delays) if recent_delays else 0.0
-        recent_cancel_rate = (
-            100 * sum(item["cancelled"] for item in recent) / len(recent) if recent else 0.0
-        )
+        # BTS final cancellation/diversion flags have no reliable issue time,
+        # so no final status enters the agent-visible recent-flow features.
+        recent_cancel_rate = 0.0
         recent_disruption_rate = (
             100
             * sum(
-                item["cancelled"]
-                or item["diverted"]
-                or (
-                    item["delay_minutes"] is not None
-                    and item["delay_minutes"] >= 15
-                )
+                item["delay_minutes"] is not None
+                and item["delay_minutes"] >= 15
                 for item in recent
             )
             / len(recent)
@@ -1785,6 +2088,15 @@ class HistoricalBacktestRuntime:
         weather_cancel = max(persistence_cancel, hazard_score * 4.0)
         weather_disruption = max(persistence_disruption, 5.0 + hazard_score * 9.0)
         weather_delay = persistence_delay + hazard_score * 12.0
+        features = self._historical_analog_features(
+            issued_minute=issued_minute,
+            targets=targets,
+            latest_weather=latest_weather,
+            recent=recent,
+        )
+        analog_prediction = self._historical_analog_prediction(
+            features, target_count=demand
+        )
         candidates = [
             candidate(
                 "SCHEDULE_BASELINE",
@@ -1811,6 +2123,39 @@ class HistoricalBacktestRuntime:
                 f"Uses only the latest time-gated weather hazard score {hazard_score}/10"
                 + (f": {', '.join(hazard_signals)}." if hazard_signals else "."),
             ),
+            {
+                "id": f"{episode_id}-CAND-HISTORICAL_ANALOG",
+                **analog_prediction,
+                "label": "June-trained historical analogue",
+                "predicted_cancelled_count": round(
+                    demand
+                    * max(
+                        0.0,
+                        min(
+                            1.0,
+                            analog_prediction["predicted_cancel_rate_pct"] / 100,
+                        ),
+                    )
+                ),
+                "predicted_disrupted_count": round(
+                    demand
+                    * max(
+                        0.0,
+                        min(
+                            1.0,
+                            analog_prediction["predicted_disruption_rate_pct"]
+                            / 100,
+                        ),
+                    )
+                ),
+                "explanation": (
+                    "Frozen June 2026 inverse-distance neighbors applied to the "
+                    "20 status-agnostic, time-gated features available at issue time."
+                ),
+                "source_kind": "MODEL_FORECAST",
+                "model_id": self.historical_analog_model["model_id"],
+                "feature_hash": hashlib.sha256(_json(features).encode()).hexdigest(),
+            },
         ]
         context = {
             "scheduled_movements": demand,
@@ -1820,6 +2165,10 @@ class HistoricalBacktestRuntime:
             "recent_disruption_rate_pct": round(recent_disruption_rate, 1),
             "weather_hazard_score": hazard_score,
             "weather_signals": hazard_signals,
+            "features": features,
+            "feature_names": list(HISTORICAL_ANALOG_FEATURES),
+            "historical_analog_model_id": self.historical_analog_model["model_id"],
+            "historical_analog_model_hash": self.historical_analog_model_hash,
         }
         return candidates, context
 
@@ -1829,25 +2178,35 @@ class HistoricalBacktestRuntime:
         handoffs: list[dict[str, Any]],
         context: Mapping[str, Any],
     ) -> tuple[str, str, str]:
-        hazard = int(context.get("weather_hazard_score", 0))
-        recent_count = int(context.get("recent_matured_outcomes", 0))
-        fallback_method = (
-            "WEATHER_STRESS" if hazard >= 2 else "RECENT_FLOW" if recent_count >= 3 else "SCHEDULE_BASELINE"
-        )
-        fallback = next(
-            item["id"] for item in candidates if item["method"] == fallback_method
-        )
+        if len(candidates) != 1 or candidates[0].get("method") != "HISTORICAL_ANALOG":
+            raise ValueError(
+                "Qwen may receive only the preselected HISTORICAL_ANALOG candidate"
+            )
+        selected_candidate = candidates[0]
+        fallback = str(selected_candidate["id"])
         if not self.enable_llm:
-            return fallback, "deterministic_fallback", f"Deterministic fallback selected {fallback_method} from observed context."
+            return (
+                fallback,
+                "historical_analog",
+                "The frozen June-trained historical analogue supplied the numerical forecast; local explanation was disabled.",
+            )
         prompt = {
-            "task": "Choose exactly one allowlisted next-hour aggregate forecast. Do not invent an ID or operational action.",
+            "task": (
+                "Verify and briefly explain the one preselected numerical next-hour "
+                "forecast. Return its supplied ID; do not choose another method, "
+                "invent an ID, or propose an operational action."
+            ),
             "context": dict(context),
             "handoffs": [
                 {"from_agent": item["from_agent"], "summary": item["summary"]}
                 for item in handoffs
             ],
-            "candidates": candidates,
-            "response_schema": {"candidate_id": "one supplied ID", "summary": "short evidence-based reason"},
+            "preselected_candidate": selected_candidate,
+            "allowlisted_candidate_ids": [fallback],
+            "response_schema": {
+                "candidate_id": fallback,
+                "summary": "short evidence-based verification",
+            },
         }
         body = json.dumps(
             {
@@ -1859,8 +2218,9 @@ class HistoricalBacktestRuntime:
                         "role": "system",
                         "content": (
                             "Return one strict JSON object with exactly candidate_id and summary. "
-                            "Choose one supplied candidate_id. In summary, cite at least one "
-                            "provided number or weather signal and explain the choice in under 25 words."
+                            "The candidate is already selected by the frozen numerical model. "
+                            "Return that exact allowlisted ID and explain or verify it using at "
+                            "least one provided number or weather signal in under 25 words."
                         ),
                     },
                     {"role": "user", "content": _json(prompt)},
@@ -1881,9 +2241,8 @@ class HistoricalBacktestRuntime:
             match = re.search(r"\{.*\}", str(content), flags=re.DOTALL)
             decoded = json.loads(match.group(0) if match else content)
             selected = str(decoded.get("candidate_id", ""))
-            allowlist = {item["id"] for item in candidates}
-            if selected not in allowlist:
-                raise ValueError("model returned an ID outside the allowlist")
+            if selected != fallback:
+                raise ValueError("model returned an ID outside its one-candidate allowlist")
             reason = str(
                 decoded.get("summary")
                 or decoded.get("reason")
@@ -1891,16 +2250,17 @@ class HistoricalBacktestRuntime:
                 or decoded.get("explanation")
                 or ""
             ).strip()
-            selected_method = next(
-                item["method"] for item in candidates if item["id"] == selected
-            )
             if not reason:
                 reason = (
-                    f"Local model returned {selected_method}; its response did not include a rationale."
+                    "Local Qwen verified the historical analogue; its response did not include a rationale."
                 )
             return selected, "local_model", reason[:500]
         except Exception as exc:
-            return fallback, "deterministic_fallback", f"Local model unavailable or invalid ({type(exc).__name__}); selected {fallback_method}."
+            return (
+                fallback,
+                "historical_analog_fallback",
+                f"Local explanation was unavailable or invalid ({type(exc).__name__}); the frozen historical analogue remains selected.",
+            )
 
     def _issue_forecast(self, issued_minute: int) -> dict[str, Any] | None:
         if issued_minute >= DAY_MINUTES:
@@ -1951,6 +2311,7 @@ class HistoricalBacktestRuntime:
         )
         candidates, context = self._forecast_candidates(
             episode_id=episode_id,
+            issued_minute=issued_minute,
             targets=targets,
             latest_weather=graph_latest_weather,
             recent=graph_recent,
@@ -1958,7 +2319,13 @@ class HistoricalBacktestRuntime:
         for item in candidates:
             self._create_node("ForecastCandidate", item)
             self._create_edge(episode_id, "CONSIDERED", item["id"])
-        selected_id, source, summary = self._local_model_choice(candidates, handoffs, context)
+        numerical_candidate = next(
+            item for item in candidates if item["method"] == "HISTORICAL_ANALOG"
+        )
+        model_allowlist = [numerical_candidate]
+        selected_id, source, summary = self._local_model_choice(
+            model_allowlist, handoffs, context
+        )
         selected = next(item for item in candidates if item["id"] == selected_id)
         model_run_id = f"{episode_id}-MODEL"
         forecast_id = f"{episode_id}-FORECAST"
@@ -1967,9 +2334,14 @@ class HistoricalBacktestRuntime:
             {
                 "id": model_run_id,
                 "runtime_kind": "HISTORICAL_SHADOW_BACKTEST",
-                "provider": "ollama" if source == "local_model" else "deterministic",
-                "model": self.model if source == "local_model" else "bounded-forecast-fallback",
-                "allowlisted_candidate_ids": [item["id"] for item in candidates],
+                "provider": "ollama" if source == "local_model" else "frozen_artifact",
+                "model": (
+                    self.model
+                    if source == "local_model"
+                    else self.historical_analog_model["model_id"]
+                ),
+                "allowlisted_candidate_ids": [item["id"] for item in model_allowlist],
+                "comparison_candidate_ids": [item["id"] for item in candidates],
                 "selected_candidate_id": selected_id,
                 "coordinator_input_handoff_ids": [item["id"] for item in handoffs],
                 "decision_source": source,
@@ -1987,8 +2359,10 @@ class HistoricalBacktestRuntime:
             "horizon_end_minute": horizon_end,
             "horizon_label": f"{_clock(issued_minute)}–{_clock(horizon_end)}",
             "selected_by": source,
+            "selection_mode": "NUMERICAL_DEFAULT_WITH_OPTIONAL_QWEN_VERIFICATION",
             "selection_summary": summary,
-            "allowlisted_candidate_ids": [item["id"] for item in candidates],
+            "allowlisted_candidate_ids": [item["id"] for item in model_allowlist],
+            "comparison_candidate_ids": [item["id"] for item in candidates],
         }
         self._create_node("Forecast", {**forecast, "payload_json": forecast})
         self._create_edge(episode_id, "USED_MODEL", model_run_id)
@@ -2068,37 +2442,32 @@ class HistoricalBacktestRuntime:
 
     @staticmethod
     def _summarize_visible(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
-        """Summarize only events already visible to agents before horizon close."""
+        """Summarize timestamp-visible events without using final status labels."""
 
         count = len(rows)
         delays = [
             item["delay_minutes"]
             for item in rows
-            if not item["cancelled"] and item["delay_minutes"] is not None
+            if item.get("delay_minutes") is not None
         ]
-        cancelled = sum(bool(item["cancelled"]) for item in rows)
-        diverted = sum(bool(item["diverted"]) for item in rows)
         disrupted = sum(
-            bool(item["cancelled"])
-            or bool(item["diverted"])
-            or (
-                item["delay_minutes"] is not None
-                and item["delay_minutes"] >= 15
-            )
+            item.get("delay_minutes") is not None
+            and float(item["delay_minutes"]) >= 15
             for item in rows
         )
         mean_delay = round(sum(delays) / len(delays), 1) if delays else None
         return {
             "movements": count,
-            "cancelled": cancelled,
-            "diverted": diverted,
+            "cancelled": 0,
+            "diverted": 0,
             "disrupted": disrupted,
-            "cancel_rate_pct": round(100 * cancelled / count, 1) if count else 0.0,
+            "cancel_rate_pct": 0.0,
             "disruption_rate_pct": round(100 * disrupted / count, 1) if count else 0.0,
             "mean_delay_minutes": mean_delay,
             "mean_delay_band": _delay_band(mean_delay),
             "observed_delay_count": len(delays),
-            "unavailable_delay_count": count - cancelled - len(delays),
+            "unavailable_delay_count": count - len(delays),
+            "final_status_labels_sealed": True,
         }
 
     def _persist_complete_evaluation(
@@ -2453,9 +2822,8 @@ class HistoricalBacktestRuntime:
                 "actual_time_local": outcome["actual_time_local"],
                 "actual_minute": outcome["actual_minute"],
                 "delay_minutes": outcome["delay_minutes"],
-                "cancelled": outcome["cancelled"],
-                "diverted": outcome["diverted"],
                 "delay_band": outcome["delay_band"],
+                "final_status_labels": "SEALED_UNTIL_ARCHIVE_SETTLEMENT",
             }
         return public
 
