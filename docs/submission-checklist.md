@@ -2,7 +2,7 @@
 
 ## Repository and setup
 
-- [ ] Public repository URL is added to the README and submission form.
+- [x] Public repository URL is added to the README and submission form.
 - [x] Event-period repository is separate from the pre-event exploration prototype.
 - [x] Python dependency versions and judged server/model tags are recorded.
 - [x] `make audit` checks package completeness, scenario/knowledge hashes, action contracts, and local documentation links offline.
@@ -54,8 +54,8 @@
 
 - [x] Product name: `GroundGraph`.
 - [x] Tracks: `Agents That Act on Connected Data`, `Agent Memory and Coordination`, `Company Brain`.
-- [ ] Repository URL: `<PUBLIC_REPOSITORY_URL>`.
-- [x] Demo asset: [`demo/groundgraph-demo.mp4`](../demo/groundgraph-demo.mp4); replace with its public repository URL after publishing.
+- [x] Repository URL: [github.com/SuVI3010/groundgraph](https://github.com/SuVI3010/groundgraph).
+- [x] Demo asset: [groundgraph-demo.mp4](https://github.com/SuVI3010/groundgraph/blob/main/demo/groundgraph-demo.mp4).
 - [x] Complete local setup path: `docs/local-setup.md`.
 - [ ] Team members and roles are correct.
 - [ ] Every team member is registered on only this team and can explain the graph model, key Cypher, architecture, model boundary, and data provenance.

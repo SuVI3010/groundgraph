@@ -101,7 +101,7 @@ ollama serve                                # keep this terminal open if Ollama 
 In a new terminal:
 
 ```bash
-git clone <PUBLIC_REPOSITORY_URL> groundgraph
+git clone https://github.com/SuVI3010/groundgraph.git groundgraph
 cd groundgraph
 make setup
 make pull-model

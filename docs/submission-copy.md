@@ -58,7 +58,7 @@ FalkorDB is the primary application state, not a visualization added after plann
 
 ## Links to add before submission
 
-- Repository: `<PUBLIC_REPOSITORY_URL>`
-- Demo video: [`demo/groundgraph-demo.mp4`](../demo/groundgraph-demo.mp4)
-- Demo evidence manifest: [`demo/groundgraph-demo.manifest.json`](../demo/groundgraph-demo.manifest.json)
-- Live demo or local instructions: `docs/local-setup.md`
+- Repository: [github.com/SuVI3010/groundgraph](https://github.com/SuVI3010/groundgraph)
+- Demo video: [groundgraph-demo.mp4](https://github.com/SuVI3010/groundgraph/blob/main/demo/groundgraph-demo.mp4)
+- Demo evidence manifest: [groundgraph-demo.manifest.json](https://github.com/SuVI3010/groundgraph/blob/main/demo/groundgraph-demo.manifest.json)
+- Live demo or local instructions: [docs/local-setup.md](https://github.com/SuVI3010/groundgraph/blob/main/docs/local-setup.md)
