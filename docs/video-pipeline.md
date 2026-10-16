@@ -1,71 +1,95 @@
 # Demo video pipeline
 
-The recorder produces the 1440×900 submission video from the running release
-candidate. It drives the visible interface rather than fabricating screenshots,
-and records the exact local-model and FalkorDB results returned during the run.
+The recorder creates a **1440×900 review candidate** from the running release. It drives the real interface, focuses one decision step at a time, burns readable subtitles into the picture, and stores the API evidence used to validate every narrated claim.
+
+It never overwrites `demo/groundgraph-demo.mp4`. Candidate review and promotion remain separate steps.
 
 ## Dependencies
 
-- Google Chrome or Chromium
-- Node.js 20 or newer
-- Playwright 1.62.1 or newer
-- macOS `say`
-- `ffmpeg` and `ffprobe`
+- the full local GroundGraph stack with FalkorDB and Ollama;
+- Google Chrome or Chromium;
+- Node.js 20 or newer;
+- Playwright 1.62.1 or newer;
+- macOS `say`; and
+- `ffmpeg` and `ffprobe`.
 
-The wrapper finds the Playwright copy bundled with Codex when it is available.
-On another machine, install only the automation library and reuse local Chrome:
+The wrapper can use the Playwright copy bundled with Codex. On another machine:
 
 ```bash
 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --no-save playwright@1.62.1
 ```
 
-## Read-only smoke test
+## Read-only UI and contract check
 
-With the full local stack running, check the viewport and browser rendering:
+Start the complete stack, then run:
 
 ```bash
 ./scripts/record_demo.sh --dry-run
 ```
 
-The smoke test stubs every browser POST with the current snapshot. It does not
-reset, advance, or otherwise mutate the FalkorDB replay. Its screenshot is
-written to `.artifacts/demo-pipeline/dry-run.png`.
+This permits live GET requests and blocks every browser mutation. It verifies the official-server health contract, the multi-airport catalog, the 330–380-word narration, and all required linear-story selectors. It writes a focused screenshot to `.artifacts/demo-pipeline/dry-run.png`.
 
-## Record a review candidate
+## Record a candidate
 
-First run the repository's normal verification and demo checks. Then record:
+The default target uses Daniel at 185 words per minute and switches ORD to ATL:
 
 ```bash
 ./scripts/record_demo.sh \
   --record \
   --allow-mutations \
+  --force \
+  --voice=Daniel \
+  --rate=185 \
+  --secondary-airport=ATL \
   --output=demo/groundgraph-demo-candidate.mp4
 ```
 
-The explicit mutation flag is required because the recording clears rehearsal
-memory, changes server autonomy, advances the replay, applies a plan, resets
-with preserved memory, and publishes the synthetic policy update. Before doing
-so, the script verifies all of the following:
+Expected duration is **about 2:40–2:50**. Runtime model latency may extend a scene, but the finished candidate must remain between 2:20 and 3:10 or the recorder rejects it.
 
-- the API is healthy;
-- `runtime_mode` is `server`;
-- the configured local model is `qwen3:4b-instruct`; and
-- six specialists report concurrent execution.
+The explicit mutation flag is required because the run:
 
-The final run demonstrates the disruption, six handoffs, local-model selection,
-causal path, field-level provenance, guarded application, persistent contextual
-memory, Operations Brain, policy supersession, and the 09:04 replan. The visual
-stream comes from Chrome's DevTools screencast at 1440×900. Narration is created
-per scene with `say`, normalized to broadcast-friendly loudness, and muxed with
-H.264 video and AAC audio by `ffmpeg`.
+1. selects and clears the ORD replay;
+2. disables automatic application;
+3. advances to the modeled 08:36 baggage disruption;
+4. applies the validated proposal once;
+5. advances to a real no-action checkpoint;
+6. asks Operations Brain a bounded ownership question;
+7. switches to a distinct ATL graph; and
+8. returns to the preserved ORD graph.
 
-The output is accompanied by:
+Before capturing each claim, the recorder checks the backing API state. It fails rather than producing a video if the decision episode, six handoffs, Qwen allowlist, model selection, seven guards, outcome, no-action reason, Operations Brain evidence, or airport isolation differs from the narration.
 
-- `groundgraph-demo-candidate-cover.jpg`, captured from the final interface;
-- `groundgraph-demo-candidate.manifest.json`, containing runtime evidence,
-  scene timings, narration, frame count, duration, and the video SHA-256 digest.
+## Visual and audio treatment
 
-The recorder refuses to overwrite `demo/groundgraph-demo.mp4`. Watch the entire
-candidate, inspect the manifest, and only then replace the submission asset.
-Use `--keep-work` when frame-level debugging is needed; otherwise the temporary
-JPEG and uncompressed-audio files are deleted after a successful encode.
+- The browser remains 1440×900.
+- Stage-rail controls reveal one decision step at a time.
+- Camera transforms, a dimmed full-screen backdrop, and a spotlight enlarge the active explanation region without empty frame edges.
+- The cursor appears only for meaningful interactions.
+- Captions are generated from the exact scene narration and drawn into the captured browser frames. This keeps them burned into the H.264 picture even when FFmpeg was built without `libass`; the equivalent SRT is retained with `--keep-work`.
+- Scene narration is padded, normalized to `-16 LUFS`, and muxed as 48 kHz AAC.
+
+The candidate produces:
+
+- `groundgraph-demo-candidate.mp4`;
+- `groundgraph-demo-candidate-cover.jpg`; and
+- `groundgraph-demo-candidate.manifest.json`.
+
+The manifest records runtime health, narration settings and word count, scene timings, frame count, SHA-256, and semantic proof for the applied episode, deliberate no-action episode, and distinct airport graphs.
+
+Use `--keep-work` to retain captured frames, intermediate audio, and the generated SRT file. Without it, temporary material is removed only after the candidate and manifest are complete.
+
+## Review before promotion
+
+Watch the whole candidate at normal player size and once without audio. A judge should be able to identify:
+
+- what changed and why the decision happened at that moment;
+- what six specialists contributed;
+- which options existed and why one won;
+- what Qwen was allowed to choose;
+- which checks gated execution;
+- the modeled result;
+- why the next cycle deliberately did nothing;
+- how memory and company knowledge remain connected; and
+- how another airport uses a distinct FalkorDB graph.
+
+Also run full decode, black-frame, silence, and subtitle checks. Promote the candidate only after visual review and after its manifest matches the promoted filename and source commit.

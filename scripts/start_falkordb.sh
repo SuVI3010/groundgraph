@@ -24,17 +24,28 @@ EOF
 fi
 
 if ! podman info >/dev/null 2>&1; then
+  MACHINE_NAME="$(podman system connection list --format '{{if .Default}}{{.Name}}{{end}}' 2>/dev/null | head -n 1)"
+  MACHINE_NAME="${MACHINE_NAME%-root}"
   if ! podman machine list --format '{{.Name}}' 2>/dev/null | grep -q .; then
     echo "Creating the local Podman machine..."
-    echo "Using Podman's default machine provider for this host."
-    if ! podman machine init --cpus 2 --memory 4096 --disk-size 20; then
+    MACHINE_NAME="groundgraph-podman"
+    PROVIDER_ARGS=()
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      # AppleHV ships with Podman and avoids requiring Docker Desktop, Colima,
+      # or a separately managed virtualization daemon on macOS.
+      PROVIDER_ARGS=(--provider applehv)
+    fi
+    if ! podman machine init "${PROVIDER_ARGS[@]}" --cpus 2 --memory 4096 --disk-size 20 --update-connection "$MACHINE_NAME"; then
       podman machine list --format '{{.Name}}' 2>/dev/null | grep -q . || exit 1
       echo "A Podman machine was created concurrently; continuing."
     fi
   fi
+  if [[ -z "$MACHINE_NAME" ]]; then
+    MACHINE_NAME="$(podman machine list --format '{{.Name}}' 2>/dev/null | head -n 1)"
+  fi
   echo "Starting the local Podman machine..."
   START_LOG="$(mktemp)"
-  if ! podman machine start >"$START_LOG" 2>&1; then
+  if ! podman machine start "$MACHINE_NAME" >"$START_LOG" 2>&1; then
     if ! podman info >/dev/null 2>&1; then
       cat "$START_LOG" >&2
       echo "Podman machine failed to start. Diagnostic state:" >&2

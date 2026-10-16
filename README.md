@@ -1,6 +1,6 @@
 # GroundGraph
 
-**A graph-native airport operations recovery command center.** GroundGraph continuously replays a bounded winter morning at Chicago O'Hare, runs six specialist Cypher reads against FalkorDB, builds materially different recovery strategies from the connected state, lets a local model select only from a context-bounded shortlist of the safe non-dominated ranking, applies plans under current synthetic policy, and recalls modeled outcomes only when the disruption context matches.
+**A graph-native airport operations recovery command center.** GroundGraph switches between bounded historical-demand replays for Chicago O'Hare, Atlanta, and San Francisco. For every decision it runs six specialist Cypher reads against FalkorDB, builds materially different recovery strategies from the connected state, lets a local model compare only server-approved safe candidates, applies plans under current synthetic policy, and recalls modeled outcomes only when the disruption context matches.
 
 GroundGraph enters all three 2026 FalkorDB GraphRAG Hackathon tracks:
 
@@ -8,11 +8,11 @@ GroundGraph enters all three 2026 FalkorDB GraphRAG Hackathon tracks:
 2. **Agent Memory and Coordination**
 3. **Company Brain**
 
-[![GroundGraph demo: O'Hare recovery replay](demo/groundgraph-demo-cover.jpg)](demo/groundgraph-demo.mp4)
+[![GroundGraph demo: explainable airport recovery](demo/groundgraph-demo-cover.jpg)](demo/groundgraph-demo.mp4)
 
 **[Watch the GroundGraph demo](demo/groundgraph-demo.mp4)** — full FalkorDB server through Podman, local Qwen selection, graph-coordinated specialists, guarded application, persistent memory, and live policy supersession.
 
-The [recording manifest](demo/groundgraph-demo.manifest.json) pins the source commit, runtime health, scene timings, media properties, and SHA-256 checksum for the final 3:49 demo.
+The [recording manifest](demo/groundgraph-demo.manifest.json) records the source commit, runtime health, scene timings, media properties, and SHA-256 checksum for the packaged demo.
 
 This repository is the event-period implementation for the [FalkorDB GraphRAG Hackathon](https://www.wemakedevs.org/hackathons/falkordb) and follows its [submission rules](https://www.wemakedevs.org/hackathons/falkordb/rules).
 
@@ -20,18 +20,24 @@ The project is an airport-operations research replay. It does not issue air-traf
 
 ## The demonstration
 
-The four-hour replay covers six connected United flights from 08:00–12:00 CST on January 12, 2024.
+The airport selector activates one independent four-hour, six-flight scenario and its own FalkorDB graph:
 
-- Public BTS schedule fields, time-gated NOAA weather, and FAA runway facts provide the historical context.
-- A modeled 08:36 baggage-reconciliation delay propagates into the `UA1414-IN → UA2672-OUT` rotation.
-- An observed 09:04 NOAA weather update and a modeled 09:12 runway event trigger later planning cycles.
+| Airport | Replay window | Historical context | Modeled operating pressure |
+|---|---|---|---|
+| **ORD** | January 12, 2024 · 08:00–12:00 CST | BTS schedule fields, time-gated NOAA KORD weather, and FAA runway identity/length. | Gates, rotation availability at decision time, baggage exception, runway inspection, capacity effects, policy, actions, and outcomes. |
+| **ATL** | January 12, 2024 · 14:00–18:00 EST | BTS schedule fields, time-gated NOAA KATL weather, and FAA runway identity/length. | Gates, rotations at decision time, weather-to-capacity effects, baggage exception, policy, actions, and outcomes. |
+| **SFO** | January 6, 2024 · 13:00–17:00 PST | BTS schedule fields, time-gated NOAA KSFO weather, and FAA runway identity/length. | Gates, rotations at decision time, wind/rain capacity effects, baggage exception, policy, actions, and outcomes. |
+
+These are historical-demand replays, not reconstructions of actual airport decisions. The selected dates, schedule identities/times, weather reports, and runway identities/lengths establish context; gates, disruptions beyond the named weather observations, resource state, causal effects, recovery actions, and results are replay assumptions.
+
+- The **Decision Story** is scoped to one persisted `DecisionEpisode`. It presents the trigger, why action is needed now, all six specialist findings, the safe candidates Qwen received, its selection, seven deterministic application checks, the projected outcome, and the next scan without combining records from different cycles.
 - Weather, Flow, Gate, Turnaround, Policy, and Memory specialists execute six domain-specific Cypher reads concurrently. Their start/end timestamps, evidence IDs, input graph version, findings, and handoffs are persisted before coordination.
-- The planner constructs `FLOW_BALANCE`, `GATE_SWAP`, and `TURNAROUND_RECOVERY` as different two-action bundles. Benefit and operational burden come from the active graph neighborhood; `cost_score` is lower-is-better. The server first computes the full safe non-dominated `safe_candidate_set`, then forms `model_candidate_set` from candidates within 4 cost points of its leader for a `TURNAROUND` event class or within 8 for other event classes.
+- The planner constructs `FLOW_BALANCE`, `GATE_SWAP`, and `TURNAROUND_RECOVERY` as different two-action bundles. Benefit and operational burden come from the active graph neighborhood; `cost_score` is lower-is-better. The server first computes the full safe non-dominated `safe_candidate_set`, then forms `model_candidate_set` from candidates within 18 cost points of its leader for a `TURNAROUND` event class or within 8 for other event classes.
 - Local `qwen3:4b-instruct` receives only `model_candidate_set` and may select one ID from that shortlist. The same IDs are stored in `ModelRun.allowlisted_candidate_ids`; invalid or unavailable model output uses a labeled deterministic fallback.
-- The interface toggle changes server-side autonomy through `/api/autonomy`. A current policy may authorize bounded auto-application; supervised mode retains the same seven application checks.
+- Before application, the server recomputes seven checks: same current graph version, current policy authority, current replay knowledge, required targets and graph links, execution-freeze clearance, minimum projected benefit, and the churn guard. The interface toggle changes server-side autonomy through `/api/autonomy`; supervised mode uses the same checks.
 - Each applied modeled outcome preserves a full `DecisionEpisode → Plan → Outcome ← Memory` lineage and the same six unique `AgentRun → Finding → Handoff` chains consumed by that `DecisionEpisode`. Those records survive replay reset and application restart while the FalkorDB volume is retained. The memory can influence a later ranking only when event class and connected flights, rotations, or resources match.
 
-Source fields and replay assumptions are classified as **Observed**, **Derived**, or **Modeled**. Flights, runways, gates, events, and turnarounds carry stable record IDs and connect through `SOURCED_FROM` or `MODELED_BY` to `SourceRecord` evidence. Mixed records have field-level boundaries in [Data provenance](docs/data-provenance.md), and all counterfactual improvements are described as projected under the replay assumptions. The exact selected BTS, NOAA, and FAA rows are checked into the [public evidence pack](data/public/README.md) with pinned hashes and reproducible extraction instructions.
+Source fields and replay assumptions are classified as **Observed**, **Derived**, or **Modeled**. Flights, runways, gates, events, and turnarounds carry stable record IDs and connect through `SOURCED_FROM` or `MODELED_BY` to `SourceRecord` evidence. Mixed records have field-level boundaries in [Data provenance](docs/data-provenance.md), and all counterfactual improvements are described as projected under the replay assumptions. The default ORD scenario has exact selected BTS, NOAA, and FAA rows in the [public evidence pack](data/public/README.md), with pinned hashes and reproducible extraction instructions. The ATL and SFO packages record source URLs, row keys, observed/modeled field lists, and source-file digests, but their selected raw rows are not checked into that evidence pack.
 
 ## Why FalkorDB is essential
 
@@ -53,7 +59,7 @@ In the judged server mode, loss of FalkorDB returns a structured `503 GRAPH_UNAV
 
 | Track | Visible behavior | Graph evidence |
 |---|---|---|
-| **Agents That Act on Connected Data** | Three distinct graph-derived strategies, a full safe non-dominated ranking, context-bounded model shortlist, lower-is-better cost scoring, and guarded application. The visible causal path is rebuilt only from persisted relationships. | `safe_candidate_set`; `model_candidate_set`; `ModelRun.allowlisted_candidate_ids`; `Event-[:AFFECTS|CONSTRAINS|DELAYS]→…`; `Flight-[:RECOVERED_BY]→Action`; `Action-[:USES_RESOURCE|REORDERS|PROTECTS|AUTHORIZED_BY]→…`; applied `Outcome`. |
+| **Agents That Act on Connected Data** | One episode-scoped Decision Story shows three graph-derived strategies, the safe ranking, the model shortlist, Qwen's choice, seven fresh guards, and the projected result. The visible causal path is rebuilt only from persisted relationships. | `safe_candidate_set`; `model_candidate_set`; `ModelRun.allowlisted_candidate_ids`; `Event-[:AFFECTS|CONSTRAINS|DELAYS]→…`; `Flight-[:RECOVERED_BY]→Action`; `Action-[:USES_RESOURCE|REORDERS|PROTECTS|AUTHORIZED_BY]→…`; applied `Outcome`. |
 | **Agent Memory and Coordination** | Six specialists run real concurrent domain Cypher reads, deliver timestamped versioned handoffs, and replan every five replay minutes and on events. An applied episode restores the same six unique specialist chains alongside its context-matched memory and full decision lineage. | `AgentRun → Finding → Handoff`; `DecisionEpisode-[:CONSUMED_HANDOFF]→Handoff`; `DecisionEpisode → Plan → Outcome ← Memory`; later matching `DecisionEpisode-[:RECALLED]→Memory`. |
 | **Company Brain** | Plain-language questions route to ownership, incident, current-policy, or supersession traversals and return cited graph evidence. Superseding policy increments graph state and triggers replanning. | `Policy → ProcedureVersion → SourceDocument/Team/Role`, `Incident → Event/Flight/Team/Role`, and `SUPERSEDES` history. |
 
@@ -65,7 +71,7 @@ The bundled [`mcp_server.py`](mcp_server.py) exposes six allowlisted stdio tools
 
 ```mermaid
 flowchart LR
-    UI[Top-down ORD replay] --> API[Flask API]
+    UI[ORD / ATL / SFO replay] --> API[Flask API]
     API --> LOOP[5-minute + event replanner]
     LOOP --> A[Six concurrent domain Cypher reads]
     A -->|timestamped findings + handoffs| G[(FalkorDB)]
@@ -75,9 +81,11 @@ flowchart LR
     C -->|plan + evidence| G
     G -->|policy-authorized apply| O[Outcome + memory]
     O --> LOOP
+    G --> DS[Episode-scoped Decision Story]
+    DS --> UI
 ```
 
-The judged path runs the full official `docker.io/falkordb/falkordb:6.0.0` server locally through Podman. The submission video, screenshots, and verification use `runtime_mode: server`. FalkorDBLite is available only as a non-judged development fallback.
+The judged path runs the full official `docker.io/falkordb/falkordb:6.0.0` server locally through Podman. On macOS, the bootstrap creates an AppleHV Podman machine when no machine exists, so the judged path does not require Docker Desktop or Colima. The submission video, screenshots, and verification use `runtime_mode: server`. FalkorDBLite is available only as a non-judged development fallback.
 
 After the container image, Python packages, and Ollama model are installed, the checked-in replay runs locally without calling external data or model APIs.
 
@@ -102,7 +110,7 @@ make start
 
 Open [http://127.0.0.1:5050](http://127.0.0.1:5050). The first `make start` initializes a small Podman VM, pulls official FalkorDB, waits for database health, and starts the app. FalkorDB Browser is at [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
-Podman chooses the machine provider supported by the host and installed Podman version. GroundGraph does not require a particular provider; use the default unless your Podman installation documents otherwise.
+On macOS, `make start` creates an AppleHV-backed Podman machine when none exists, then starts the official FalkorDB container. If a Podman machine is already configured, it uses the default Podman connection for that machine.
 
 On Linux, install the same prerequisites with your distribution's package manager; Podman normally runs natively there, so `make start` uses it without creating a virtual machine.
 
@@ -140,6 +148,11 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 |---|---|---|
 | `GET` | `/api/health` | Runtime mode, graph counts, state version, model configuration. |
 | `GET` | `/api/snapshot` | Complete judge-facing replay projection. |
+| `GET` | `/api/decision-story` | One complete trigger-to-outcome explanation, optionally selected by `episode_id`. |
+| `GET` | `/api/airports` | Airport selector metadata and truth-boundary notes for ORD, ATL, and SFO. |
+| `POST` | `/api/airports/select` | Activate an airport replay by code and return its graph snapshot. |
+| `GET` | `/api/scenarios` | Scenario registry, runtime graph names, and load status. |
+| `POST` | `/api/scenarios/select` | Activate a registered scenario by ID. |
 | `GET` | `/api/replanning` | Agents, timestamped handoffs, contextual memory, plan, and cycle history. |
 | `GET` / `POST` | `/api/company-brain` | Route a question to ownership, incident, current-policy, or supersession evidence. |
 | `POST` | `/api/replan/tick` | Advance replay time and trigger due event/periodic cycles. |
@@ -155,10 +168,11 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 |---|---|
 | `app.py`, `engine.py` | API, graph adapter, replay, agents, planning, memory, and policy logic. |
 | `mcp_server.py` | Allowlisted, read-only MCP tools plus candidate validation. |
-| `static/` | Top-down command-center interface. |
-| `data/scenario.json` | Bounded replay fixture. |
-| `data/provenance.json` | Machine-readable source and assumption contract. |
-| `data/public/` | Minimal public-source extracts and the hash-verifying reproduction tool. |
+| `static/` | Airport view, episode-scoped Decision Story, controls, and evidence interface. |
+| `data/scenario-registry.json` | ORD, ATL, and SFO scenario metadata, graph names, truth notes, and package hashes. |
+| `data/scenario.json`, `data/scenarios/` | The default ORD replay and additional ATL/SFO replay packages. |
+| `data/provenance.json` | Machine-readable source and assumption contract for the default ORD evidence pack. |
+| `data/public/` | Minimal ORD public-source extracts and the hash-verifying reproduction tool. |
 | `knowledge/` | Versioned synthetic SOP, incident, shift handoff, teams, roles, and import manifest. |
 | `cypher/` | Essential track-defining graph queries. |
 | `docs/` | Architecture, graph model, setup, track evidence, demo, disclosure, and checklist. |

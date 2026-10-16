@@ -1,37 +1,56 @@
 [
   {
-    "id": "overview",
-    "title": "GroundGraph and the evidence boundary",
-    "narration": "Meet GroundGraph, a graph-native recovery command center for airport operations. This bounded replay uses the full local FalkorDB server and a local Qwen model. Selected schedule, weather, and runway fields come from public records. Gates, disruptions, policies, and every recovery effect are clearly labeled as modeled. The top-down airport view is a research sandbox, not a live air traffic control system."
+    "id": "hook",
+    "title": "One delay, one connected rotation",
+    "minimum_seconds": 12,
+    "narration": "At eight thirty-six at Chicago O'Hare, a modeled baggage delay adds twelve minutes to U A fourteen fourteen's turnaround, putting U A twenty-six seventy-two at risk. GroundGraph must recover time without breaking policy."
   },
   {
-    "id": "coordination",
-    "title": "One disruption, six graph specialists",
-    "narration": "At eight thirty-six, a modeled baggage-reconciliation delay adds twelve minutes to the stored turnaround task graph for the U A fourteen fourteen to U A twenty-six seventy-two rotation. Six specialists now execute separate Cypher reads against one FalkorDB state version. Weather, runway flow, compatible gates, turnaround dependencies, current policy, and contextual memory each hand a versioned finding to the coordinator before it may choose a plan. The Cycles view exposes those query names, evidence identifiers, timestamps, and consumed handoffs."
+    "id": "why-now",
+    "title": "Why GroundGraph decided now",
+    "minimum_seconds": 16,
+    "narration": "Why now? U A twenty-six seventy-two leaves at nine twenty-five, forty-nine minutes away, but its turnaround needs fifty-seven. The eight-minute gap opens a FalkorDB decision episode and locks all six specialists to one graph version."
   },
   {
-    "id": "decision",
-    "title": "Bounded local-model selection with graph proof",
-    "narration": "GroundGraph builds three materially different strategies from connected state: flow balance, a compatible gate swap, and turnaround-task recovery. Projected recovery and operational burden come from the graph, and cost score is lower-is-better. The server computes the full safe non-dominated ranking, then forms a context-bounded model shortlist: within four cost points of the leader for a turnaround event class, or eight for other event classes. Only those shortlist identifiers enter the Model Run allowlist, and local Qwen selects one of them. The visible causal path is then queried from relationships already stored in FalkorDB. Evidence cards expose stable source-record identifiers and the observed and modeled fields behind each entity."
+    "id": "findings",
+    "title": "Six specialists read one graph",
+    "minimum_seconds": 20,
+    "narration": "Six specialists read that state in parallel. Weather checks conditions. Flow checks runway capacity. Gate checks compatibility. Turnaround finds the delayed task chain. Policy confirms authority. Memory searches matching outcomes. The coordinator waits until all six versioned findings are stored."
   },
   {
-    "id": "application",
-    "title": "Fresh validation and bounded autonomy",
-    "narration": "Qwen proposes; it does not execute. Before application, the server rechecks graph version, required relationships, current policy and company knowledge, source freshness, minimum benefit, the execution freeze, and the churn guard. The autonomy switch changes the server setting. Turning it on revalidates the pending proposal, applies the modeled recovery once, and writes an Outcome. Turning it off again leaves later proposals available for inspection."
+    "id": "options",
+    "title": "Three options, one bounded model choice",
+    "minimum_seconds": 23,
+    "narration": "Now the tradeoff is visible. Turnaround recovery saves twelve minutes with four minutes of coordination. Flow balance saves twelve but spends runway flexibility. Gate recovery moves the rotation and saves six. The server validates and ranks all three before Qwen sees their identifiers. Qwen selects one allowlisted fit, and its choice is stored beside the shortlist."
   },
   {
-    "id": "memory",
-    "title": "Persistent, context-matched episodic memory",
-    "narration": "Application also preserves the complete Decision Episode to Plan to Outcome and Memory lineage, together with the same six unique Agent Run to Finding to Handoff chains consumed by that episode. The memory records event class, flights, rotation, resources, policies, and a disruption signature. Restarting the replay reseeds operations while restoring that applied lineage and all six specialist chains in FalkorDB. On the next matching baggage cycle, the coordinator states exactly whether memory adjusted the lower-is-better cost or changed the selected strategy. An unrelated weather cycle cannot reuse this baggage memory."
+    "id": "apply",
+    "title": "Seven checks before one application",
+    "minimum_seconds": 24,
+    "narration": "The model cannot execute. The validator rereads graph version, target links, authority, knowledge freshness, benefit, execution freeze, and churn. Seven checks pass. One click writes the actions and modeled outcome to FalkorDB. Only now does projected delay move from thirty to eighteen minutes: twelve recovered under replay assumptions."
   },
   {
-    "id": "knowledge",
-    "title": "Operations Brain and live policy supersession",
-    "narration": "For the third track, Operations Brain routes plain-language questions to different bounded traversals. Ownership questions return the current policy, owner, responsible role, source excerpt, and graph path. Incident questions follow a separate set of connected records. Publishing the synthetic replacement gate policy creates a SUPERSEDES relationship, advances graph state, invalidates stale proposals, and triggers replanning without an application-code change. The new cycle consumes the replacement version while the old version remains queryable as history."
+    "id": "restraint",
+    "title": "Continuous replanning also means no action",
+    "minimum_seconds": 18,
+    "narration": "At the next checkpoint, GroundGraph reads again. The projected benefit is now below the four-minute benefit threshold. The log records no action; model selection and application are skipped. Continuous replanning includes knowing when not to disturb a stable operation."
   },
   {
-    "id": "continuous",
-    "title": "Continuous replanning with restraint",
-    "narration": "At nine oh four, the next time-gated public weather observation enters the graph and triggers another coordinated check. Continuous replanning does not mean constant intervention: the system records the cycle and declines unnecessary churn when no material recovery is available. Across all three tracks, FalkorDB determines what the agents can see, how they coordinate and remember, and which current company knowledge authorizes an action. Every improvement shown here is projected under the replay assumptions, never claimed as measured real-world savings."
+    "id": "memory-knowledge",
+    "title": "Memory and company knowledge stay connected",
+    "minimum_seconds": 22,
+    "narration": "The outcome becomes memory tied to event class, rotation, resources, and policy. A matching disruption may use it; unrelated weather cannot. Operations Brain follows the same graph to name the gate-recovery owner, responsible role, procedure, source section, and evidence path. Memory and company knowledge remain inspectable."
+  },
+  {
+    "id": "airports",
+    "title": "The same decision contract, another airport",
+    "minimum_seconds": 12,
+    "narration": "GroundGraph is not hard-coded to O'Hare. Atlanta loads a distinct FalkorDB graph with different flights, runways, weather, and evidence. Returning to O'Hare restores its applied decision."
+  },
+  {
+    "id": "close",
+    "title": "Every intervention explained",
+    "minimum_seconds": 7,
+    "narration": "One shared graph. Six specialists. A bounded local model. Every intervention explained before it is applied."
   }
 ]

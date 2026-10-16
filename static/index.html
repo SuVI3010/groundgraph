@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="GroundGraph is a FalkorDB-powered airport recovery command center for graph-grounded, multi-agent operational replanning." />
-    <meta name="theme-color" content="#07121b" />
-    <title>GroundGraph · Airport recovery command center</title>
+    <meta name="description" content="GroundGraph explains every airport recovery decision from trigger to outcome." />
+    <meta name="theme-color" content="#07131d" />
+    <title>GroundGraph · Explainable airport recovery</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
@@ -14,71 +14,56 @@
       <header class="command-header">
         <a class="brand" href="/" aria-label="GroundGraph command center">
           <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 42 42">
-              <path d="M9 29 19 19l6 5 9-12"></path>
-              <circle cx="9" cy="29" r="3"></circle><circle cx="19" cy="19" r="3"></circle>
-              <circle cx="25" cy="24" r="3"></circle><circle cx="34" cy="12" r="3"></circle>
-            </svg>
+            <svg viewBox="0 0 42 42"><path d="M9 29 19 19l6 5 9-12"></path><circle cx="9" cy="29" r="3"></circle><circle cx="19" cy="19" r="3"></circle><circle cx="25" cy="24" r="3"></circle><circle cx="34" cy="12" r="3"></circle></svg>
           </span>
-          <span class="brand-copy"><strong>GroundGraph</strong><small>Autonomous airport recovery</small></span>
+          <span class="brand-copy"><strong>GroundGraph</strong><small>Explainable airport recovery</small></span>
         </a>
 
         <div class="mission-context" aria-label="Active replay">
-          <span class="airport-code" id="airport-code">ORD</span>
-          <span><strong id="airport-name">Chicago O’Hare</strong><small id="scenario-label">Historical operations replay · 12 Jan 2024</small></span>
+          <div class="airport-picker" id="airport-selector">
+            <button class="airport-switcher" id="airport-switcher" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span class="airport-code" id="airport-code">ORD</span>
+              <span><strong id="airport-name">Chicago O’Hare</strong><small id="scenario-label">Loading replay…</small></span>
+              <b aria-hidden="true">⌄</b>
+            </button>
+            <div class="airport-menu" id="airport-menu" role="listbox" hidden></div>
+          </div>
           <i></i>
-          <span><strong id="window-label">08:00–12:00 CT</strong><small>bounded recovery sandbox</small></span>
+          <span class="replay-window"><strong id="window-label">08:00–12:00 CT</strong><small>historical replay sandbox</small></span>
         </div>
 
         <div class="system-status" aria-label="Runtime status">
           <span class="truth-badge" id="truth-badge">CONNECTING</span>
           <span class="runtime-pill" id="model-status"><i></i><span><strong>Local model</strong><small>checking</small></span></span>
           <span class="runtime-pill" id="graph-status"><i></i><span><strong>FalkorDB</strong><small>checking</small></span></span>
-          <button class="icon-button" id="reset-button" type="button" title="Restart replay" aria-label="Restart replay">
+          <button class="icon-button" id="reset-button" type="button" title="Restart this replay" aria-label="Restart this replay">
             <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6"></path></svg>
           </button>
         </div>
       </header>
 
-      <section class="overview-rail" aria-label="Current operational picture">
+      <section class="situation-rail" aria-label="Current operational picture">
         <article class="incident-summary" id="incident-summary">
           <span class="severity-symbol" aria-hidden="true">!</span>
-          <span><small><span id="incident-kicker">ACTIVE DISRUPTION</span><em class="provenance-tag mixed" id="incident-provenance" title="Observed source with a modeled operational effect">MIXED</em></small><strong id="incident-title">Baggage reconciliation delay entering the graph</strong><span id="incident-detail">UA1414 → UA2672 · 12-minute modeled turnaround variance</span></span>
+          <span><small><span id="incident-kicker">WATCHING OPERATIONS</span><em class="provenance-tag mixed" id="incident-provenance">MIXED</em></small><strong id="incident-title">Waiting for the replay</strong><span id="incident-detail">GroundGraph will explain why it acts when connected state changes.</span></span>
         </article>
-
-        <div class="metric-row" aria-label="Replay measures">
-          <article><small>Downstream delay</small><strong><span id="delay-before">—</span><i>→</i><span class="projection" id="delay-after">—</span></strong><em id="delay-delta">awaiting plan</em></article>
-          <article><small>Flights in path</small><strong><span id="flights-before">—</span><i>→</i><span class="projection" id="flights-after">—</span></strong><em id="flights-delta">graph-derived</em></article>
-          <article><small>Gate waiting</small><strong><span id="gate-before">—</span><i>→</i><span class="projection" id="gate-after">—</span></strong><em id="gate-delta">modeled where unavailable</em></article>
-          <article class="checks-metric"><small>Safety checks</small><strong id="checks-value">WAITING</strong><em id="checks-detail">validated before apply</em></article>
-        </div>
-
-        <div class="provenance-legend" aria-label="Data provenance">
-          <span><i class="observed"></i><b>Observed</b><small>public record</small></span>
-          <span><i class="derived"></i><b>Derived</b><small>graph query</small></span>
-          <span><i class="modeled"></i><b>Modeled</b><small>stated assumption</small></span>
-          <span title="Observed source with a modeled operational effect"><i class="mixed"></i><b>Mixed</b><small>observed + modeled</small></span>
+        <div class="metric-row" aria-label="Decision result">
+          <article><small>Downstream delay</small><strong><span id="delay-before">—</span><i>→</i><span class="projection" id="delay-after">—</span></strong><em id="delay-delta">waiting for a decision</em></article>
+          <article><small>Flights in impact path</small><strong><span id="flights-before">—</span><i>→</i><span class="projection" id="flights-after">—</span></strong><em id="flights-delta">graph-derived</em></article>
+          <article class="gate-metric" hidden><small>Gate waiting</small><strong><span id="gate-before">—</span><i>→</i><span class="projection" id="gate-after">—</span></strong><em id="gate-delta">modeled where unavailable</em></article>
+          <article class="checks-metric"><small>Execution guard</small><strong id="checks-value">WATCHING</strong><em id="checks-detail">seven checks before apply</em></article>
         </div>
       </section>
 
       <main class="cockpit-grid">
         <section class="surface-card panel" aria-label="Top-down airport operations replay">
-          <header class="panel-header surface-header">
-            <div class="title-stack">
-              <span class="live-indicator"><i></i> OPERATIONS REPLAY</span>
-              <h1>O’Hare surface &amp; flow</h1>
-            </div>
-            <div class="weather-summary" id="weather-summary">
-              <span class="weather-icon" aria-hidden="true">❄</span>
-              <span><strong id="weather-primary">Loading weather…</strong><small id="weather-secondary">Time-gated observation</small></span>
-              <em class="provenance-tag observed">OBSERVED</em>
-            </div>
+          <header class="surface-header">
+            <div class="title-stack"><span class="eyebrow live"><i></i> OPERATIONS REPLAY</span><h1 id="surface-title">Airport surface &amp; connected flights</h1></div>
+            <div class="weather-summary" id="weather-summary"><span class="weather-icon" aria-hidden="true">◌</span><span><strong id="weather-primary">Loading weather…</strong><small id="weather-secondary">Only observations available by replay time</small></span><em class="provenance-tag observed">OBSERVED</em></div>
             <div class="replay-clock"><small>REPLAY TIME</small><strong id="replay-clock">08:00</strong><span id="clock-zone">CT</span></div>
           </header>
-
           <div class="airport-view" id="airport-view">
-            <canvas id="airport-canvas" aria-label="Animated top-down O’Hare operations replay"></canvas>
-
+            <canvas id="airport-canvas" aria-label="Animated top-down airport operations replay"></canvas>
             <div class="map-topline">
               <span class="map-chip"><i class="cyan"></i><b id="airborne-count">0</b> airborne</span>
               <span class="map-chip"><i class="blue"></i><b id="taxi-count">0</b> taxiing</span>
@@ -86,156 +71,95 @@
               <span class="map-chip risk"><i class="amber"></i><b id="risk-count">0</b> at risk</span>
               <span class="map-chip protected"><i class="green"></i><b id="protected-count">0</b> protected</span>
             </div>
-
-            <div class="map-watermark"><strong>ATC-INSPIRED OPERATIONS SANDBOX</strong><span>Historical replay · stylized airport view · no live control</span></div>
-
-            <section class="engine-unavailable" id="engine-unavailable" hidden role="status" aria-live="polite">
-              <span class="engine-unavailable-icon" aria-hidden="true">!</span>
-              <span><small>READ-ONLY SAFETY STATE</small><strong id="engine-unavailable-title">Planning engine unavailable</strong><p id="engine-unavailable-copy">GroundGraph requires the API and FalkorDB to load operational state.</p></span>
-            </section>
-
-            <article class="event-callout" id="event-callout">
-              <time id="event-time">08:00</time>
-              <span class="event-symbol" id="event-symbol">↗</span>
-              <span><strong id="event-title">Historical demand is entering the graph</strong><small id="event-detail">Flights appear when their public schedule records enter the replay window.</small></span>
-              <em class="provenance-tag mixed" id="event-provenance" title="Observed source with a modeled operational effect">MIXED</em>
-            </article>
-
-            <div class="replan-radar" id="replan-radar" aria-live="polite">
-              <span class="radar-ring"><i></i></span>
-              <span><small>CONTINUOUS REPLANNING</small><strong id="replan-state">Monitoring connected state</strong><em id="replan-next">Next scheduled scan in 5 min</em></span>
-            </div>
+            <div class="map-watermark"><strong>MODELED OPERATIONS SANDBOX</strong><span>Historical inputs · no live airport control</span></div>
+            <section class="engine-unavailable" id="engine-unavailable" hidden role="status" aria-live="polite"><span class="engine-unavailable-icon">!</span><span><small>SAFE READ-ONLY STATE</small><strong id="engine-unavailable-title">Planning engine unavailable</strong><p id="engine-unavailable-copy">GroundGraph requires its API and FalkorDB.</p></span></section>
+            <article class="event-callout" id="event-callout"><time id="event-time">08:00</time><span class="event-symbol" id="event-symbol">↗</span><span><strong id="event-title">Historical demand is entering the graph</strong><small id="event-detail">A visible event will start a decision story.</small></span><em class="provenance-tag mixed" id="event-provenance">MIXED</em></article>
           </div>
-
           <div class="replay-controls">
             <button class="play-control" id="play-button" type="button" aria-pressed="false"><span id="play-icon">▶</span><strong id="play-label">Play</strong></button>
-            <div class="timeline-block">
-              <input id="timeline" type="range" min="0" max="240" step="0.1" value="0" aria-label="Replay timeline" />
-              <div class="timeline-labels"><span id="timeline-start">08:00</span><span class="event-marker" id="event-marker">08:36 disruption</span><span class="decision-marker" id="decision-marker">09:00 decision</span><span id="timeline-end">12:00</span></div>
-            </div>
-            <div class="speed-control" aria-label="Replay speed">
-              <small>SPEED</small>
-              <div role="group" aria-label="Replay speed multiplier">
-                <button type="button" data-speed="1" aria-pressed="false">1×</button>
-                <button type="button" data-speed="4" class="active" aria-pressed="true">4×</button>
-                <button type="button" data-speed="12" aria-pressed="false">12×</button>
-                <button type="button" data-speed="30" aria-pressed="false">30×</button>
-              </div>
-            </div>
-            <button class="jump-control" id="jump-button" type="button"><span>Jump to</span><strong>disruption</strong></button>
+            <div class="timeline-block"><input id="timeline" type="range" min="0" max="240" step="0.1" value="0" aria-label="Replay timeline" /><div class="timeline-labels"><span id="timeline-start">08:00</span><span class="event-marker" id="event-marker">08:36 event</span><span class="decision-marker" id="decision-marker">08:36 decision</span><span id="timeline-end">12:00</span></div></div>
+            <div class="speed-control" aria-label="Replay speed"><small>SPEED</small><div role="group"><button type="button" data-speed="1" aria-pressed="false">1×</button><button type="button" data-speed="4" class="active" aria-pressed="true">4×</button><button type="button" data-speed="12" aria-pressed="false">12×</button><button type="button" data-speed="30" aria-pressed="false">30×</button></div></div>
+            <button class="jump-control" id="jump-button" type="button"><span>Jump to</span><strong>first disruption</strong></button>
           </div>
         </section>
 
-        <aside class="autonomy-card panel" aria-label="Autonomous recovery control">
-          <header class="autonomy-header">
-            <div class="title-stack">
-              <span class="live-indicator autonomy"><i></i> GUARDED AUTONOMY</span>
-              <h2>Recovery swarm</h2>
-            </div>
-            <div class="cycle-badge"><small>REPLAN CYCLE</small><strong id="cycle-number">00</strong></div>
+        <aside class="decision-story-card panel" aria-label="Decision story">
+          <header class="story-header">
+            <span><small class="eyebrow autonomy"><i></i> DECISION STORY</small><strong id="story-headline">GroundGraph is watching the connected operation</strong><em id="story-subtitle">No intervention is needed yet.</em></span>
+            <span class="decision-number"><small>DECISION</small><strong id="cycle-number">00</strong></span>
           </header>
-
-          <section class="agent-network" aria-label="Communicating specialist agents">
-            <div class="network-spine" aria-hidden="true"></div>
-            <article class="agent-card" data-agent="weather"><span class="agent-icon">W</span><span><strong>Weather</strong><small id="weather-agent-message">Watching observations</small></span><i class="agent-state"></i></article>
-            <article class="agent-card" data-agent="flow"><span class="agent-icon">F</span><span><strong>Flow</strong><small id="flow-agent-message">Watching capacity</small></span><i class="agent-state"></i></article>
-            <article class="agent-card" data-agent="gate"><span class="agent-icon">G</span><span><strong>Gate</strong><small id="gate-agent-message">Watching resources</small></span><i class="agent-state"></i></article>
-            <article class="agent-card" data-agent="turn"><span class="agent-icon">T</span><span><strong>Turnaround</strong><small id="turn-agent-message">Watching tasks</small></span><i class="agent-state"></i></article>
-            <article class="agent-card" data-agent="policy"><span class="agent-icon">P</span><span><strong>Policy</strong><small id="policy-agent-message">Current procedure loaded</small></span><i class="agent-state"></i></article>
-            <article class="agent-card" data-agent="memory"><span class="agent-icon">M</span><span><strong>Memory</strong><small id="memory-agent-message">Watching prior outcomes</small></span><i class="agent-state"></i></article>
-            <article class="agent-card coordinator" data-agent="coordinator"><span class="agent-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2"></circle><circle cx="18" cy="6" r="2"></circle><circle cx="8" cy="18" r="2"></circle><circle cx="18" cy="17" r="2"></circle><path d="m8 7 8-1M7 9l1 7m2-1 6-7m-6 10 6-1"></path></svg></span><span><strong id="coordinator-name">Qwen Coordinator</strong><small id="coordinator-message">Waiting for specialist findings</small></span><i class="agent-state"></i></article>
-            <article class="agent-card validator" data-agent="safety"><span class="agent-icon">✓</span><span><strong>Safety Validator</strong><small id="safety-agent-message">Guardrails ready</small></span><i class="agent-state"></i></article>
-          </section>
-
-          <div class="handoff-ticker" id="handoff-ticker">
-            <span class="ticker-label">SHARED GRAPH</span>
-            <span class="ticker-flow"><b id="handoff-route">6 agents → FalkorDB → Qwen → validator</b><small id="handoff-message">Every finding is versioned before selection.</small></span>
-            <span class="version-chip" id="graph-version">v1</span>
+          <div class="story-progress" id="stage-rail" aria-label="Decision progress">
+            <span data-phase="trigger"><i>1</i><b>Detected</b></span><span data-phase="findings"><i>2</i><b>Read graph</b></span><span data-phase="options"><i>3</i><b>Compared</b></span><span data-phase="choice"><i>4</i><b>Qwen</b></span><span data-phase="guards"><i>5</i><b>Verified</b></span><span data-phase="outcome"><i>6</i><b>Result</b></span><span data-phase="next"><i>7</i><b>Watching</b></span>
           </div>
+          <div class="story-scroll" id="decision-story" aria-live="polite">
+            <section class="story-section story-trigger story-active" id="why-now" data-story-order="1"><header><span class="story-step amber">1</span><span><small>WHY NOW?</small><strong id="story-trigger-title">Waiting for a material graph change</strong></span><time id="story-trigger-time">08:00</time></header><p id="story-trigger-copy">Scheduled and event-driven checks continue in the background.</p></section>
 
-          <nav class="detail-tabs" aria-label="Recovery details">
-            <button type="button" class="active" data-tab="plan" aria-selected="true">Plan <b id="plan-count">0</b></button>
-            <button type="button" data-tab="cycles" aria-selected="false">Cycles <b id="cycle-count">0</b></button>
-            <button type="button" data-tab="evidence" aria-selected="false">Evidence <b id="evidence-count">0</b></button>
-            <button type="button" data-tab="memory" aria-selected="false">Memory <b id="memory-count">0</b></button>
-          </nav>
+            <section class="story-section story-findings" id="agent-findings" data-story-order="2"><header><span class="story-step cyan">2</span><span><small>WHAT SIX SPECIALISTS FOUND</small><strong id="findings-title">Every specialist reads the same graph version</strong></span><em id="findings-count">0 / 6</em></header>
+              <div class="agent-network" id="story-findings">
+                <article class="agent-card" data-agent="weather"><span class="agent-icon">W</span><span><strong>Weather</strong><small id="weather-agent-message">Watching observations</small></span><i class="agent-state"></i></article>
+                <article class="agent-card" data-agent="flow"><span class="agent-icon">F</span><span><strong>Flow</strong><small id="flow-agent-message">Watching capacity</small></span><i class="agent-state"></i></article>
+                <article class="agent-card" data-agent="gate"><span class="agent-icon">G</span><span><strong>Gate</strong><small id="gate-agent-message">Watching compatibility</small></span><i class="agent-state"></i></article>
+                <article class="agent-card" data-agent="turn"><span class="agent-icon">T</span><span><strong>Turnaround</strong><small id="turn-agent-message">Watching tasks</small></span><i class="agent-state"></i></article>
+                <article class="agent-card" data-agent="policy"><span class="agent-icon">P</span><span><strong>Policy</strong><small id="policy-agent-message">Checking authority</small></span><i class="agent-state"></i></article>
+                <article class="agent-card" data-agent="memory"><span class="agent-icon">M</span><span><strong>Memory</strong><small id="memory-agent-message">Checking prior outcomes</small></span><i class="agent-state"></i></article>
+              </div>
+              <div class="coordination-line"><span class="coordinator-mark">◆</span><span><strong id="coordinator-name">Qwen Coordinator</strong><small id="coordinator-message">Waiting for six persisted findings</small></span><b>→</b><span class="validator-mark">✓</span><span><strong>Safety Validator</strong><small id="safety-agent-message">Seven guards ready</small></span></div>
+            </section>
 
-          <section class="detail-stage" id="detail-stage" aria-live="polite">
-            <div class="waiting-state" id="waiting-state">
-              <span class="waiting-orbit"><i></i><i></i><i></i></span>
-              <span><small id="waiting-kicker">WATCHING 18 CONNECTED ENTITIES</small><strong id="waiting-title">No intervention needed yet</strong><p id="waiting-copy">The swarm replans when an event changes capacity, a turnaround, a gate, or a downstream rotation.</p></span>
-            </div>
-            <div class="plan-stage" id="plan-stage" hidden>
-              <header><span><small id="plan-kicker">GRAPH-SAFE PLAN</small><strong id="plan-title">Recovery plan ready</strong></span><span class="plan-badges"><em id="plan-selector">SELECTOR NOT REPORTED</em><em id="plan-score">AWAITING CHECKS</em></span></header>
-              <div class="action-list" id="action-list"></div>
-              <div class="plan-reason" id="plan-reason"><span>WHY THIS PLAN</span><p id="plan-explanation">Waiting for graph-grounded explanation.</p></div>
-              <div class="decision-envelope" id="decision-envelope"></div>
-            </div>
-            <div class="cycles-stage" id="cycles-stage" hidden></div>
-            <div class="evidence-stage" id="evidence-stage" hidden></div>
-            <div class="memory-stage" id="memory-stage" hidden></div>
-          </section>
+            <section class="story-section story-options" id="candidate-options" data-story-order="3"><header><span class="story-step violet">3</span><span><small>WHAT OPTIONS WERE POSSIBLE?</small><strong id="options-title">A safe option appears only after the six reads</strong></span><em id="options-count">0 options</em></header><div class="story-candidates" id="story-candidates"><p class="empty-copy">No recovery comparison is needed yet.</p></div></section>
 
-          <footer class="autonomy-footer">
-            <label class="autonomy-toggle"><input id="auto-apply" type="checkbox" checked /><span></span><strong>Auto-apply after validator · <em id="auto-apply-state">server on · 10-min churn guard</em></strong></label>
-            <button class="primary-action" id="primary-action" type="button"><span id="primary-action-label">Run replan now</span><b>→</b></button>
+            <section class="story-section story-choice" id="model-choice" data-story-order="4"><header><span class="story-step violet">4</span><span><small>WHAT DID THE MODEL DECIDE?</small><strong id="story-choice-title">No model choice yet</strong></span><em id="story-selector">WAITING</em></header><p id="story-choice-copy">Qwen can select only an identifier from the server-approved shortlist. It cannot create or execute an action.</p></section>
+
+            <section class="story-section story-guards" id="safety-checks" data-story-order="5"><header><span class="story-step green">5</span><span><small>WHY WAS IT SAFE?</small><strong id="guards-title">Seven checks must pass before apply</strong></span><em id="guards-count">0 / 7</em></header><div class="guard-grid" id="story-guards"></div></section>
+
+            <section class="story-section story-result" id="decision-outcome" data-story-order="6"><header><span class="story-step green">6</span><span><small>ACTION + PROJECTED RESULT</small><strong id="story-result-title">No action applied</strong></span><em id="story-result-status">WATCHING</em></header><div class="story-outcome" id="story-outcome"><span><small>Downstream delay</small><strong>—</strong></span><span><small>Gate waiting</small><strong>—</strong></span><span><small>Protected flights</small><strong>—</strong></span></div><p id="story-result-copy">Results are shown only after a validated decision.</p></section>
+
+            <section class="story-section story-next" id="next-check" data-story-order="7"><header><span class="story-step cyan">7</span><span><small>WHAT HAPPENS NEXT?</small><strong id="story-next-title">Continuous monitoring is active</strong></span><time id="story-next-time">+5 min</time></header><p id="story-next-copy">GroundGraph checks on schedule and replans sooner when connected state changes.</p></section>
+          </div>
+          <footer class="story-footer">
+            <div class="replan-radar" id="replan-radar"><span class="radar-ring"><i></i></span><span><small>CONTINUOUS REPLANNING</small><strong id="replan-state">Monitoring connected state</strong><em id="replan-next">Next scan in 5 replay min</em></span></div>
+            <label class="autonomy-toggle"><input id="auto-apply" type="checkbox" checked /><span></span><strong>Auto-apply <em id="auto-apply-state">ON</em></strong></label>
+            <button class="primary-action" id="primary-action" type="button"><span id="primary-action-label">Run decision check</span><b>→</b></button>
           </footer>
         </aside>
       </main>
 
-      <section class="proof-grid" aria-label="Graph reasoning and hackathon track proof">
-        <article class="causal-card panel">
-          <header class="compact-header">
-            <span><small>LIVE CAUSAL PATH <em class="provenance-tag derived">DERIVED</em></small><strong id="causal-title">Disruption → operational impact → safe action</strong></span>
-            <span class="path-status" id="path-status"><i></i> graph watch active</span>
-          </header>
-          <div class="causal-path" id="causal-path" aria-label="Current graph reasoning path"></div>
-          <p class="causal-caption" id="causal-caption">Each hop is returned from FalkorDB; selecting a node reveals its evidence and provenance.</p>
-        </article>
+      <section class="decision-deck panel" aria-label="Decision history and graph proof">
+        <div class="decision-log-pane">
+          <header class="deck-header"><span><small>DECISION LOG</small><strong>What GroundGraph decided, when, and why</strong></span><nav class="detail-tabs" aria-label="Open supporting proof"><button type="button" data-tab="plan" aria-selected="false">Plan <b id="plan-count">0</b></button><button type="button" data-tab="cycles" aria-selected="false">Agent trace <b id="cycle-count">0</b></button><button type="button" data-tab="evidence" aria-selected="false">Graph proof <b id="evidence-count">0</b></button><button type="button" data-tab="memory" aria-selected="false">Memory <b id="memory-count">0</b></button></nav></header>
+          <div class="decision-log" id="decision-log"><span class="log-empty">The first scheduled check will appear here.</span></div>
+          <div class="causal-summary"><span><small>WHY THIS ACTION CONNECTS</small><strong id="causal-title">Waiting for an active decision path</strong></span><div class="causal-path" id="causal-path"></div><span class="path-status" id="path-status"><i></i> graph watch active</span><p class="causal-caption" id="causal-caption">Select a node to inspect its provenance.</p></div>
+        </div>
 
-        <article class="outcomes-card panel">
-          <header class="compact-header">
-            <span><small>PROJECTED OUTCOME</small><strong id="outcome-title">Counterfactual opens after a safe plan</strong></span>
-            <span class="outcome-improvement" id="outcome-improvement">—</span>
-          </header>
-          <div class="comparison-bars" id="comparison-bars">
-            <div><span>Downstream delay</span><i><b class="historical" style="width:100%"></b><b class="projected" style="width:0%"></b></i><strong id="bar-delay-value">waiting</strong></div>
-            <div><span>Gate waiting</span><i><b class="historical" style="width:100%"></b><b class="projected" style="width:0%"></b></i><strong id="bar-gate-value">waiting</strong></div>
+        <aside class="brain-card" aria-label="Ask Operations Brain">
+          <header><span><small>ASK OPERATIONS BRAIN</small><strong>Company knowledge, with proof</strong></span><span class="brain-status" id="brain-status"><i></i> ready</span></header>
+          <div class="brain-presets"><button type="button" data-brain-question="Who owns the current gate reassignment policy?">Who owns gate recovery?</button><button type="button" data-brain-question="What happened in the current incident, and who is responsible?">Explain this incident</button><button type="button" data-brain-question="Which operating procedure is current, and what did it supersede?">Current procedure?</button></div>
+          <form class="brain-form" id="brain-form"><label class="sr-only" for="brain-question">Ask about operational knowledge</label><input id="brain-question" name="question" type="text" autocomplete="off" placeholder="Ask about an owner, incident, or procedure…" /><button id="brain-submit" type="submit">Ask →</button></form>
+          <section class="brain-answer" id="brain-answer" aria-live="polite"><span class="brain-empty"><i>?</i><span><strong>Ask in plain language</strong><small>Every answer includes its connected evidence.</small></span></span></section>
+          <div class="track-proof" aria-label="Three-track proof"><span><i>01</i><b>ACT</b><small id="track-one-proof">Graph → action</small></span><span><i>02</i><b>COORDINATE</b><small id="track-two-proof">Six findings</small></span><span><i>03</i><b>KNOW</b><small id="track-three-proof">Current authority</small></span></div>
+          <div class="provenance-legend" aria-label="What kind of data is shown">
+            <span><i class="observed"></i><b>Observed</b><small>public record</small></span>
+            <span><i class="derived"></i><b>Derived</b><small>graph result</small></span>
+            <span><i class="modeled"></i><b>Modeled</b><small>stated assumption</small></span>
+            <span><i class="mixed"></i><b>Mixed</b><small>observed + modeled</small></span>
           </div>
-          <div class="track-proof" aria-label="Three-track coverage">
-            <span><i>01</i><b>ACT</b><small id="track-one-proof">Connected data → action</small></span>
-            <span><i>02</i><b>COORDINATE</b><small id="track-two-proof">Shared handoffs + memory</small></span>
-            <span><i>03</i><b>KNOW</b><small id="track-three-proof">Current policy + owner</small></span>
-          </div>
-        </article>
+        </aside>
 
-        <article class="brain-card panel" aria-label="Ask Operations Brain">
-          <header class="compact-header brain-header">
-            <span><small>ASK OPERATIONS BRAIN <em class="provenance-tag derived">GRAPH ANSWER</em></small><strong>Operational knowledge, with proof</strong></span>
-            <span class="brain-status" id="brain-status"><i></i> ready</span>
-          </header>
-          <div class="brain-presets" aria-label="Suggested questions">
-            <button type="button" data-brain-question="Who owns the current gate reassignment policy?">Who owns gate recovery?</button>
-            <button type="button" data-brain-question="What happened in the current incident, and who is responsible?">Explain this incident</button>
-            <button type="button" data-brain-question="Which operating procedure is current, and what did it supersede?">Which procedure is current?</button>
-          </div>
-          <form class="brain-form" id="brain-form">
-            <label class="sr-only" for="brain-question">Ask about operational knowledge</label>
-            <input id="brain-question" name="question" type="text" autocomplete="off" placeholder="Ask about an owner, incident, or procedure…" />
-            <button id="brain-submit" type="submit"><span>Ask</span><b>→</b></button>
-          </form>
-          <section class="brain-answer" id="brain-answer" aria-live="polite">
-            <span class="brain-empty"><i>?</i><span><strong>Ask in plain language</strong><small>The answer will cite the connected policies, incidents, owners, and graph path it used.</small></span></span>
+        <section class="proof-drawer" id="proof-drawer" hidden aria-label="Decision proof">
+          <header><span><small>SUPPORTING PROOF</small><strong id="proof-drawer-title">Decision detail</strong></span><button id="proof-close" type="button" aria-label="Close decision proof">×</button></header>
+          <div class="handoff-ticker" id="handoff-ticker"><span class="ticker-label">SHARED GRAPH</span><span class="ticker-flow"><b id="handoff-route">6 agents → FalkorDB → Qwen → validator</b><small id="handoff-message">Every finding is persisted before coordination.</small></span><span class="version-chip" id="graph-version">v1</span></div>
+          <section class="detail-stage" id="detail-stage">
+            <div class="waiting-state" id="waiting-state"><span class="waiting-orbit"><i></i><i></i><i></i></span><span><small id="waiting-kicker">WATCHING CONNECTED ENTITIES</small><strong id="waiting-title">No intervention needed yet</strong><p id="waiting-copy">A plan appears only when the graph finds a safe material improvement.</p></span></div>
+            <div class="plan-stage" id="plan-stage" hidden><header><span><small id="plan-kicker">GRAPH-SAFE PLAN</small><strong id="plan-title">Recovery plan ready</strong></span><span class="plan-badges"><em id="plan-selector">SELECTOR NOT REPORTED</em><em id="plan-score">AWAITING CHECKS</em></span></header><div class="action-list" id="action-list"></div><div class="plan-reason" id="plan-reason"><span>WHY THIS PLAN</span><p id="plan-explanation">Waiting for a graph-grounded explanation.</p></div><div class="decision-envelope" id="decision-envelope"></div><div class="proof-outcomes"><header><span><small>PROJECTED OUTCOME</small><strong id="outcome-title">Counterfactual opens after a safe plan</strong></span><em id="outcome-improvement">—</em></header><div class="comparison-bars" id="comparison-bars"><div><span>Downstream delay</span><i><b class="historical" style="width:100%"></b><b class="projected" style="width:0%"></b></i><strong id="bar-delay-value">waiting</strong></div><div><span>Gate waiting</span><i><b class="historical" style="width:100%"></b><b class="projected" style="width:0%"></b></i><strong id="bar-gate-value">waiting</strong></div></div></div></div>
+            <div class="cycles-stage" id="cycles-stage" hidden></div>
+            <div class="evidence-stage" id="evidence-stage" hidden></div>
+            <div class="memory-stage" id="memory-stage" hidden></div>
           </section>
-        </article>
+        </section>
       </section>
 
-      <footer class="app-footer">
-        <span id="footer-status">GroundGraph · bounded historical replay</span>
-        <span>Same demand, weather, cutoff and resource assumptions · projections are modeled, not measured real-world outcomes</span>
-      </footer>
+      <footer class="app-footer"><span id="footer-status">GroundGraph · bounded historical replay</span><span>Projected under replay assumptions · no live airport control</span></footer>
     </div>
-
     <div class="toast" id="toast" hidden role="status"></div>
     <script src="/static/airport-sim.js"></script>
     <script src="/static/app.js"></script>

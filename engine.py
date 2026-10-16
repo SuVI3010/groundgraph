@@ -1,6 +1,6 @@
 """GroundGraph's graph-native, continuously replanning airport replay engine.
 
-The engine is intentionally bounded: it controls a six-flight historical replay,
+The engine is intentionally bounded: it runs small historical-demand replays,
 not a real airport.  FalkorDB is the source of truth for operational state,
 specialist handoffs, decisions, policy authorization, and episodic memory.
 """
@@ -307,6 +307,7 @@ class GroundGraphEngine:
         data_path: Path | str | None = None,
         backend: GraphBackend | None = None,
         mode: str | None = None,
+        graph_name: str | None = None,
         lite_path: Path | str | None = None,
         enable_llm: bool | None = None,
     ) -> None:
@@ -330,7 +331,11 @@ class GroundGraphEngine:
             1, int(self.scenario_data.get("minimum_benefit_minutes", 4))
         )
         self._lock = threading.RLock()
-        self.backend = backend or GraphBackend(mode=mode, lite_path=lite_path)
+        self.backend = backend or GraphBackend(
+            mode=mode,
+            graph_name=graph_name,
+            lite_path=lite_path,
+        )
         if enable_llm is None:
             enable_llm = os.getenv("GROUNDGRAPH_ENABLE_LLM", "0") in {
                 "1",
@@ -450,12 +455,16 @@ class GroundGraphEngine:
             },
         )
         airport_id = str(scenario.get("airport", "ORD"))
+        airport_icao = str(
+            scenario.get("icao")
+            or (airport_id if len(airport_id) == 4 else f"K{airport_id}")
+        )
         self._create_node(
             "Airport",
             {
                 "id": airport_id,
                 "name": scenario.get("airport_name", "Chicago O'Hare International Airport"),
-                "icao": "KORD" if airport_id == "ORD" else airport_id,
+                "icao": airport_icao,
                 "source_kind": "OBSERVED",
             },
         )
@@ -739,6 +748,48 @@ class GroundGraphEngine:
         if not manifest_path.exists():
             return {}
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        scenario_event_ids = {
+            str(item.get("id"))
+            for item in self.data.get("events", [])
+            if item.get("id")
+        }
+        scenario_flight_ids = {
+            str(value)
+            for item in self.data.get("flights", [])
+            for value in (item.get("id"), item.get("callsign"))
+            if value
+        }
+        scenario_incidents = [
+            dict(item)
+            for item in manifest.get("incidents", [])
+            if (
+                not item.get("event_id")
+                or str(item.get("event_id")) in scenario_event_ids
+            )
+            and (
+                not item.get("affected_flight_id")
+                or str(item.get("affected_flight_id")) in scenario_flight_ids
+            )
+        ]
+        scenario_incident_ids = {
+            str(item["id"]) for item in scenario_incidents if item.get("id")
+        }
+        scenario_handoffs = [
+            dict(item)
+            for item in manifest.get("shift_handoffs", [])
+            if not item.get("references_incident_id")
+            or str(item.get("references_incident_id")) in scenario_incident_ids
+        ]
+        scenario_handoff_ids = {
+            str(item["id"]) for item in scenario_handoffs if item.get("id")
+        }
+        documents_to_seed = [
+            dict(item)
+            for item in manifest.get("documents", [])
+            if str(item.get("kind", "DOCUMENT")) == "SOP"
+            or str(item.get("id")) in scenario_incident_ids
+            or str(item.get("id")) in scenario_handoff_ids
+        ]
         organization = dict(manifest.get("organization", {}))
         if organization.get("id"):
             self._create_node("Organization", organization)
@@ -750,7 +801,7 @@ class GroundGraphEngine:
             self._create_node("Role", role)
             self._create_edge(str(role["team_id"]), "HAS_ROLE", str(role["id"]))
         documents: dict[str, dict[str, Any]] = {}
-        for document in manifest.get("documents", []):
+        for document in documents_to_seed:
             item = dict(document)
             kind = str(item.get("kind", "DOCUMENT"))
             label = "SourceDocument" if kind == "SOP" else "Incident" if kind == "INCIDENT_TICKET" else "ShiftHandoff"
@@ -762,7 +813,7 @@ class GroundGraphEngine:
                 self._create_edge(str(item["id"]), "OWNED_BY", str(item["owner_team_id"]))
             if item.get("responsible_role_id"):
                 self._create_edge(str(item["id"]), "RESPONSIBLE_ROLE", str(item["responsible_role_id"]))
-        for document in manifest.get("documents", []):
+        for document in documents_to_seed:
             if document.get("supersedes"):
                 self._create_edge(str(document["id"]), "SUPERSEDES", str(document["supersedes"]))
         procedures_by_action: dict[str, dict[str, Any]] = {}
@@ -783,7 +834,7 @@ class GroundGraphEngine:
                 self._create_edge(str(item["id"]), "SUPERSEDES", str(item["supersedes"]))
             if item.get("status") == "CURRENT":
                 procedures_by_action[str(item["action_type"])] = item
-        for incident in manifest.get("incidents", []):
+        for incident in scenario_incidents:
             incident_id = str(incident["id"])
             self.backend.query(
                 "MATCH (i:Incident {id: $id}) SET i.event_id = $event, "
@@ -819,7 +870,7 @@ class GroundGraphEngine:
                 ]
                 for flight_id in candidates:
                     self._create_edge(incident_id, "AFFECTS", flight_id)
-        for handoff in manifest.get("shift_handoffs", []):
+        for handoff in scenario_handoffs:
             if handoff.get("references_incident_id"):
                 self._create_edge(str(handoff["id"]), "REFERENCES", str(handoff["references_incident_id"]))
         return procedures_by_action
@@ -1025,7 +1076,7 @@ class GroundGraphEngine:
             "o.id, o.status, o.projected_delay, o.benefit_minutes, o.created_at, "
             "m.id, m.strategy, m.disruption_signature, m.event_class, m.context_json, "
             "m.flight_ids, m.rotation_ids, m.resource_ids, m.policy_ids, "
-            "m.benefit_minutes, m.confidence, m.created_at "
+            "m.benefit_minutes, m.confidence, m.created_at, d.replay_minute "
             "ORDER BY m.created_at DESC"
         ).result_set[:limit]
         lineages: list[dict[str, Any]] = []
@@ -1045,7 +1096,7 @@ class GroundGraphEngine:
                         "trigger": row[2], "status": row[3], "summary": row[4],
                         "based_on_version": int(row[5] or 0), "created_at": row[6],
                         "disruption_signature": row[7], "event_class": row[8],
-                        "context_json": row[9],
+                        "context_json": row[9], "replay_minute": row[37],
                     },
                     "plan": {
                         "id": row[10], "cycle": int(row[11] or 0),
@@ -1510,13 +1561,18 @@ class GroundGraphEngine:
         rows = self.backend.query(
             "MATCH (d:DecisionEpisode) OPTIONAL MATCH (d)-[:SELECTED]->(p:Plan) "
             "RETURN d.id, d.cycle, d.trigger, d.status, d.summary, d.created_at, "
-            "p.id, p.strategy ORDER BY d.created_at DESC"
+            "p.id, p.strategy, d.replay_minute ORDER BY d.created_at DESC"
         ).result_set[:limit]
         return [
             {
                 "episode_id": row[0], "cycle": int(row[1]), "trigger": row[2],
                 "status": row[3], "summary": row[4], "created_at": row[5],
                 "plan_id": row[6], "strategy": row[7],
+                "replay_minute": (
+                    int(row[8])
+                    if row[8] is not None
+                    else max(0, (int(row[1]) - 1) * self.planning_interval)
+                ),
             }
             for row in rows
         ]
@@ -1565,10 +1621,7 @@ class GroundGraphEngine:
                     if row[2] in {"OBSERVED", "MIXED"} and _list_value(row[3])
                 )
                 severity = "HIGH" if any(row[1] == "HIGH" for row in rows) else "WATCH"
-                summary = (
-                    f"Weather queried FalkorDB version {state_version}: "
-                    f"{observed} observed update(s), {len(rows)} active condition(s)."
-                )
+                summary = f"{len(rows)} weather issue{'s' if len(rows) != 1 else ''} active."
                 recommendation = "Use only observations available by the replay clock."
                 action_type = "RESEQUENCE_DEPARTURE"
             elif agent_id == "AGENT-FLOW":
@@ -1583,10 +1636,7 @@ class GroundGraphEngine:
                     {str(row[0]) for row in rows}
                     | {str(row[3]) for row in active_rows}
                 )
-                summary = (
-                    f"Flow queried {len({row[0] for row in rows})} runway(s) and "
-                    f"{len(active_rows)} active capacity constraint(s) at graph version {state_version}."
-                )
+                summary = f"{len(active_rows)} runway limit{'s' if len(active_rows) != 1 else ''} active."
                 severity = "HIGH" if active_rows else "WATCH"
                 recommendation = "Resequence only on a runway used by the target flight."
                 action_type = "RESEQUENCE_DEPARTURE"
@@ -1602,10 +1652,7 @@ class GroundGraphEngine:
                     {str(row[0]) for row in open_rows}
                     | {str(row[1]) for row in open_rows}
                 )
-                summary = (
-                    f"Gate queried {len(open_rows)} compatible open flight-gate pair(s) "
-                    f"at graph version {state_version}."
-                )
+                summary = f"{len(open_rows)} compatible gate{'s' if len(open_rows) != 1 else ''} open."
                 severity = "MEDIUM" if open_rows else "HIGH"
                 recommendation = "Use only an explicit COMPATIBLE_WITH relationship."
                 action_type = "REASSIGN_GATE"
@@ -1623,10 +1670,7 @@ class GroundGraphEngine:
                     | {str(row[3]) for row in rows}
                     | {str(row[5]) for row in delayed_rows}
                 )
-                summary = (
-                    f"Turnaround queried {len({row[0] for row in rows})} dependency DAG(s); "
-                    f"{len(delayed_rows)} task delay edge(s) are active at version {state_version}."
-                )
+                summary = f"{len(delayed_rows)} turnaround task{'s' if len(delayed_rows) != 1 else ''} late."
                 severity = "HIGH" if delayed_rows else "WATCH"
                 recommendation = "Resequence only tasks connected by the stored dependency DAG."
                 action_type = "RESEQUENCE_TASKS"
@@ -1646,10 +1690,7 @@ class GroundGraphEngine:
                     for row in rows
                     if row[1] == "CURRENT" and row[3] == "CURRENT_FOR_REPLAY"
                 ]
-                summary = (
-                    f"Policy queried {len(current)} current version(s) covering "
-                    f"{len(covered)} action type(s) at graph version {state_version}."
-                )
+                summary = f"{len(current)} procedure{'s' if len(current) != 1 else ''} permit action."
                 severity = "CLEAR" if current else "HIGH"
                 recommendation = "Permit only current, owned, source-linked authority."
                 action_type = "APPLY_VALIDATED_PLAN"
@@ -1665,8 +1706,8 @@ class GroundGraphEngine:
                 related = [row for row in rows if str(row[1] or "") == event_class]
                 evidence_ids = [str(row[0]) for row in related]
                 summary = (
-                    f"Memory queried {len(rows)} successful episode(s); {len(related)} "
-                    f"matched the {event_class or 'current'} disruption context at version {state_version}."
+                    f"{len(related)} matching recover{'ies' if len(related) != 1 else 'y'} found."
+                    if related else "No matching recovery yet."
                 )
                 severity = "INFORMED" if related else "NEW"
                 recommendation = "Adjust cost only with context-matched outcome evidence."
@@ -1912,7 +1953,7 @@ class GroundGraphEngine:
         descriptions = {
             "RESEQUENCE_DEPARTURE": "Re-sequence the modeled departure queue inside available runway capacity.",
             "REASSIGN_GATE": "Hold a compatible recovery gate for the affected aircraft rotation.",
-            "RESEQUENCE_TASKS": "Re-sequence the stored turnaround task DAG around the delayed baggage task.",
+            "RESEQUENCE_TASKS": "Re-sequence the stored turnaround task DAG around the delayed critical task.",
             "PROTECT_ROTATION": "Protect the next leg while preserving turnaround dependencies.",
         }
         actions = []
@@ -2363,7 +2404,10 @@ class GroundGraphEngine:
             resources=resources,
             churn_blocked=churn_blocked,
         )
-        model_cost_window = 4 if disruption_context.get("event_class") == "TURNAROUND" else 8
+        # The local model should receive a real tradeoff when several plans are
+        # graph-valid.  The deterministic validator still decides eligibility;
+        # this window only bounds which already-safe candidates Qwen may compare.
+        model_cost_window = 18 if disruption_context.get("event_class") == "TURNAROUND" else 8
         best_cost = int(ranked[0]["cost_score"]) if ranked else 0
         model_candidates = [
             item
@@ -2399,7 +2443,7 @@ class GroundGraphEngine:
             if selected
             else "No candidate has complete current policy and knowledge authorization."
         )
-        self._create_node("DecisionEpisode", {"id": episode_id, "cycle": cycle, "trigger": trigger, "status": status, "summary": summary, "based_on_version": state_version, "created_at": now, "disruption_signature": disruption_context["signature"], "event_class": disruption_context["event_class"], "context_json": disruption_context})
+        self._create_node("DecisionEpisode", {"id": episode_id, "cycle": cycle, "trigger": trigger, "status": status, "summary": summary, "based_on_version": state_version, "replay_minute": state["clock_minute"], "created_at": now, "disruption_signature": disruption_context["signature"], "event_class": disruption_context["event_class"], "context_json": disruption_context})
         coord_run_id = f"RUN-{cycle}-{decision_token}-COORD"
         self._create_node("AgentRun", {"id": coord_run_id, "agent_id": "AGENT-COORD", "cycle": cycle, "status": "COMPLETED", "based_on_version": state_version, "decision_source": decision_source, "started_at": now, "ended_at": _utc_now(), "created_at": now})
         self._create_edge("AGENT-COORD", "STARTED", coord_run_id)
@@ -3662,9 +3706,43 @@ class GroundGraphEngine:
             node_count = int(node_rows[0][0]) if node_rows else 0
             edge_count = int(edge_rows[0][0]) if edge_rows else 0
             policy_complete = bool(plan and plan.get("policy_authorization", {}).get("complete"))
+            scenario_view = {
+                key: value
+                for key, value in state.items()
+                if key
+                not in {
+                    "clock_minute",
+                    "last_checkpoint_minute",
+                    "cycle",
+                    "state_version",
+                }
+            }
+            # These values describe the bounded replay and its schematic. They
+            # are immutable display metadata from the checked-in scenario pack;
+            # operational state still comes from FalkorDB above.
+            for key in (
+                "icao",
+                "timezone_abbreviation",
+                "replay_label",
+                "description",
+                "public_inputs",
+                "modeled_boundary",
+                "surface_layout",
+                "weather_station",
+            ):
+                if key in self.scenario_data:
+                    scenario_view[key] = deepcopy(self.scenario_data[key])
+            airport_code = str(scenario_view.get("airport", ""))
+            scenario_view.setdefault(
+                "icao",
+                airport_code if len(airport_code) == 4 else f"K{airport_code}",
+            )
+            if isinstance(self.data.get("display"), Mapping):
+                scenario_view["display"] = deepcopy(self.data["display"])
+                scenario_view["airport_layout"] = deepcopy(self.data["display"])
             return {
                 "ok": True,
-                "scenario": {key: value for key, value in state.items() if key not in {"clock_minute", "last_checkpoint_minute", "cycle", "state_version"}},
+                "scenario": scenario_view,
                 "clock": {
                     "minute": state["clock_minute"],
                     "label": _clock(state["base_clock_minute"] + state["clock_minute"]),

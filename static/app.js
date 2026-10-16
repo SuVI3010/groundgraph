@@ -18,8 +18,16 @@ const ui = {
   speed: 4,
   visualMinute: 0,
   targetMinute: 0,
-  selectedTab: "plan",
+  selectedTab: null,
   selectedCycle: null,
+  selectedEpisode: null,
+  decisionStory: null,
+  activeStoryPhase: "trigger",
+  storyPhaseEpisode: null,
+  storyRequest: 0,
+  followLive: true,
+  airports: [],
+  airportMenuOpen: false,
   map: null,
   tickTimer: null,
   healthTimer: null,
@@ -187,7 +195,7 @@ function renderRuntime() {
   graphStatus.querySelector("small").textContent = ui.backend ? `${first(graph.runtime_mode, health.runtime_mode, "server")} · ${number(graph.node_count, number(health.node_count, 0))} nodes` : "required to run";
   const modelStatus = $("model-status"); const llm = obj(health.llm); const modelConfigured = ui.backend && llm.enabled === true;
   modelStatus.className = `runtime-pill ${modelConfigured ? "configured" : "warn"}`;
-  modelStatus.querySelector("strong").textContent = modelConfigured ? "Local Qwen configured" : ui.backend ? "Safe planner" : "Coordinator offline";
+  modelStatus.querySelector("strong").textContent = modelConfigured ? "Local Qwen" : ui.backend ? "Safe planner" : "Coordinator offline";
   modelStatus.querySelector("small").textContent = modelConfigured ? `${first(llm.model, "Ollama")} · verify on plan` : ui.backend ? "deterministic ranking" : "engine required";
   $("coordinator-name").textContent = `${coordinatorDisplayName()}${coordinatorDisplayName() === "Qwen" ? " Coordinator" : ""}`;
 }
@@ -197,14 +205,16 @@ function renderScenario() {
   $("airport-code").textContent = scenario.airport;
   $("airport-name").textContent = String(scenario.airport_name || "Chicago O’Hare").replace(" International Airport", "");
   $("scenario-label").textContent = `Historical operations replay · ${formatDate(scenario.date)}`;
-  $("window-label").textContent = `${formatClock(scenario.start_minute)}–${formatClock(scenario.end_minute)} CT`;
-  $("clock-zone").textContent = "CT";
+  const zone = first(scenario.timezone_abbreviation, ({ ORD: "CT", ATL: "ET", SFO: "PT" })[scenario.airport], "LT");
+  $("window-label").textContent = `${formatClock(scenario.start_minute)}–${formatClock(scenario.end_minute)} ${zone}`;
+  $("clock-zone").textContent = zone;
+  const surfaceTitle = $("surface-title"); if (surfaceTitle) surfaceTitle.textContent = `${scenario.airport} operations map`;
   $("timeline-start").textContent = formatClock(scenario.start_minute);
   $("timeline-end").textContent = formatClock(scenario.end_minute);
   const baggage = list(snapshot.events).find((event) => String(event.type).includes("BAG"));
   const firstDecision = Math.max(60, number(baggage?.at_minute, 36) + 5);
   $("event-marker").textContent = `${formatClock(number(baggage?.at_minute, 36))} disruption`;
-  $("event-marker").style.left = `${clampPercent(number(baggage?.at_minute, 36) / snapshot.duration)}%`;
+  $("event-marker").style.left = `${Math.max(20, clampPercent(number(baggage?.at_minute, 36) / snapshot.duration))}%`;
   $("decision-marker").textContent = `${formatClock(firstDecision)} decision`;
   $("decision-marker").style.left = `${clampPercent(firstDecision / snapshot.duration)}%`;
   $("timeline").max = String(snapshot.duration); $("timeline").min = String(scenario.start_minute);
@@ -215,8 +225,16 @@ function clampPercent(value) { return Math.max(0, Math.min(100, value * 100)); }
 function renderWeather() {
   const snapshot = ui.snapshot; const weather = [...snapshot.events].filter((event) => ["LOW_VISIBILITY_SNOW", "WEATHER_UPDATE", "WEATHER", "WIND"].includes(String(event.type).toUpperCase()) && number(event.at_minute) <= snapshot.clock.minute).sort((a, b) => number(b.at_minute) - number(a.at_minute))[0];
   if (!weather) { $("weather-primary").textContent = "Awaiting the next observation"; $("weather-secondary").textContent = "No future data is visible"; return; }
-  $("weather-primary").textContent = String(weather.type).includes("LOW_VISIBILITY") ? "Snow · ¾ mi visibility" : "Visibility improving · 2 mi";
-  $("weather-secondary").textContent = `${formatClock(weather.at_minute)} CT · KORD · time-gated`;
+  const weatherLabel = String(first(weather.description, weather.summary, weather.label, ""));
+  const type = String(weather.type).toUpperCase();
+  const visibilityMatch = weatherLabel.match(/(\d+(?:\.\d+)?|\d+\s*\/\s*\d+)\s*miles?/i);
+  const gustMatch = weatherLabel.match(/gust(?:ing|s)?(?:\s+to)?\s+(\d+)\s*knots?/i);
+  const compactFraction = (value) => ({ "1/4": "¼", "1/2": "½", "3/4": "¾" })[String(value).replaceAll(" ", "")] || value;
+  const condition = type.includes("SNOW") ? "Snow" : /thunder|lightning/i.test(weatherLabel) ? "Thunderstorm" : /heavy rain/i.test(weatherLabel) ? "Heavy rain" : type === "WIND" ? "Gusty winds" : /drizzle/i.test(weatherLabel) ? "Low ceiling" : "Weather update";
+  const measure = visibilityMatch ? `${compactFraction(visibilityMatch[1])} mi visibility` : gustMatch ? `gusts ${gustMatch[1]} kt` : "time-gated observation";
+  $("weather-primary").textContent = `${condition} · ${measure}`;
+  const station = first(snapshot.scenario.weather_station, snapshot.scenario.icao, `${String(snapshot.scenario.airport).length === 3 ? "K" : ""}${snapshot.scenario.airport}`);
+  $("weather-secondary").textContent = `${formatClock(weather.at_minute)} ${$("clock-zone").textContent} · ${station} source observation`;
 }
 
 function renderIncident() {
@@ -301,12 +319,12 @@ function renderAgents() {
     const message = first(agent.current_task, agent.role, fallback); const target = $(`${key === "turn" ? "turn" : key}-agent-message`) || (key === "coordinator" ? $("coordinator-message") : null);
     if (target) target.textContent = message;
   });
-  const validator = document.querySelector('[data-agent="safety"]'); validator.classList.remove("active", "complete", "risk");
+  const validator = document.querySelector('[data-agent="safety"]'); validator?.classList.remove("active", "complete", "risk");
   const plan = snapshot.current_plan; const applied = ["APPLIED", "EXECUTING", "COMPLETED"].includes(String(plan?.status || "").toUpperCase()); const safety = planSafety(plan);
   const valid = safety.safe && (applied || number(plan?.based_on_version) === snapshot.state_version);
-  if (ui.busy) { validator.classList.add("active"); $("safety-agent-message").textContent = "Checking current graph"; }
-  else if (plan && valid) { validator.classList.add("complete"); $("safety-agent-message").textContent = plan.display_only || plan.historical || plan.is_current === false ? "Validated when applied" : safety.checks.length ? `${safety.passedCount}/${safety.checks.length} checks passed` : "Current knowledge verified"; }
-  else if (plan) { validator.classList.add("risk"); $("safety-agent-message").textContent = "Plan blocked"; }
+  if (ui.busy) { validator?.classList.add("active"); $("safety-agent-message").textContent = "Checking current graph"; }
+  else if (plan && valid) { validator?.classList.add("complete"); $("safety-agent-message").textContent = plan.display_only || plan.historical || plan.is_current === false ? "Validated when applied" : safety.checks.length ? `${safety.passedCount}/${safety.checks.length} checks passed` : "Current knowledge verified"; }
+  else if (plan) { validator?.classList.add("risk"); $("safety-agent-message").textContent = "Plan blocked"; }
   else $("safety-agent-message").textContent = "Guardrails ready";
   const latest = [...snapshot.handoffs].sort((a, b) => number(b.cycle) - number(a.cycle))[0];
   $("handoff-route").textContent = latest ? `${agentLabel(latest.from_agent)} → FalkorDB → ${agentLabel(latest.to_agent)}` : `6 agents → FalkorDB → ${coordinatorDisplayName()} → validator`;
@@ -330,9 +348,9 @@ function renderReplanning() {
   const radar = $("replan-radar"); radar.classList.toggle("running", ui.busy || String(replanning.status).toUpperCase().includes("REPLAN"));
   $("replan-state").textContent = ui.busy ? "Specialists are reading FalkorDB" : shortStatus(replanning.status || "MONITORING");
   const next = number(replanning.next_checkpoint_minute, snapshot.clock.minute + number(replanning.interval_minutes, 5)); const remaining = Math.max(0, next - snapshot.clock.minute);
-  $("replan-next").textContent = ui.busy ? `Cycle ${cycle + 1} in progress` : `Next scan in ${remaining} replay min · 10-min churn guard`;
+  $("replan-next").textContent = ui.busy ? `Cycle ${cycle + 1} in progress` : `Next check in ${remaining} replay min`;
   const autoApply = replanning.auto_apply === true; const toggle = $("auto-apply"); toggle.checked = autoApply;
-  $("auto-apply-state").textContent = `${autoApply ? "server on" : "waiting for approval"} · ${number(replanning.execution_freeze_minutes, 10)}-min churn guard`;
+  $("auto-apply-state").textContent = autoApply ? "ON" : "OFF";
   const orderedHistory = [...history];
   const handoffCycles = snapshot.handoffs.map((handoff) => number(handoff.cycle)).filter((value) => value > 0);
   const latestCycle = first(orderedHistory[0]?.cycle, handoffCycles.length ? Math.max(...handoffCycles) : null);
@@ -505,6 +523,250 @@ function renderTrackProof() {
   $("track-three-proof").textContent = policy ? `${policy.id} · ${policy.owner}` : "Current policy + named owner";
 }
 
+const STORY_AGENT_KEY = {
+  "AGENT-WEATHER": "weather", "AGENT-FLOW": "flow", "AGENT-GATE": "gate",
+  "AGENT-TURN": "turn", "AGENT-POLICY": "policy", "AGENT-MEMORY": "memory",
+};
+
+function historyEpisodeId(item) { return first(item?.episode_id, item?.id, item?.plan_id, item?.cycle); }
+
+function plainTrigger(trigger) {
+  const value = String(trigger || "PERIODIC_CHECKPOINT").toUpperCase();
+  if (value.startsWith("EVENT:")) return "Operational event";
+  if (value.includes("POLICY")) return "Policy update";
+  if (value.includes("MANUAL")) return "Requested check";
+  return "Scheduled check";
+}
+
+function deriveDecisionStory(snapshot, historyItem = null) {
+  const item = historyItem || list(snapshot.replanning?.history)[0] || null;
+  if (!item) return null;
+  const episodeId = String(historyEpisodeId(item));
+  const currentPlan = snapshot.current_plan && String(snapshot.current_plan.episode_id || "") === episodeId ? snapshot.current_plan : null;
+  const handoffs = snapshot.handoffs.filter((handoff) => handoff.episode_id ? String(handoff.episode_id) === episodeId : number(handoff.cycle) === number(item.cycle));
+  const status = String(first(item.status, currentPlan?.status, "NO_ACTION_REQUIRED")).toUpperCase();
+  const noAction = !currentPlan || status.includes("NO_ACTION") || status.includes("NO_CHANGE");
+  const selectedId = String(first(currentPlan?.candidate_id, ""));
+  const allowlisted = list(currentPlan?.model_candidate_set).map((candidate) => String(candidate.id));
+  const eventIds = list(currentPlan?.disruption_context?.event_ids);
+  const event = snapshot.events.find((candidate) => eventIds.includes(candidate.id)) || activeEvent(snapshot) || {};
+  const checks = list(currentPlan?.safety_validation?.checks);
+  const baseline = number(first(currentPlan?.baseline_delay, snapshot.metrics?.baseline_delay_minutes, snapshot.metrics?.active_delay_minutes));
+  const projected = number(first(currentPlan?.projected_delay, snapshot.metrics?.projected_delay_minutes), baseline);
+  const replayMinute = number(first(event.at_minute, snapshot.clock.minute));
+  return {
+    ok: true, episode_id: episodeId, cycle: number(item.cycle), status,
+    result_kind: noAction ? "NO_ACTION" : status.includes("APPLIED") || String(currentPlan?.status).toUpperCase() === "APPLIED" ? "APPLIED" : "PROPOSED",
+    replay_minute: replayMinute, replay_time: formatClock(replayMinute), graph_version: number(first(currentPlan?.based_on_version, snapshot.state_version)),
+    headline: noAction ? `Checked at ${formatClock(replayMinute)}; no operational change was justified.` : `${humanize(currentPlan.strategy)} ${String(currentPlan.status).toUpperCase() === "APPLIED" ? "was applied after every guard passed" : "is ready for approval"}.`,
+    summary: first(item.summary, currentPlan?.summary),
+    trigger: { code: item.trigger, kind: plainTrigger(item.trigger), title: first(event.description, event.summary, humanize(event.type), plainTrigger(item.trigger)), detail: first(event.summary, item.summary, "Connected state opened a decision review."), source_kind: first(event.source_kind, "DERIVED"), event_ids: eventIds },
+    why_now: { explanation: first(event.summary, item.summary, "The graph changed enough to open a new review.") },
+    stages: [
+      ["detected", "Detected", "complete"], ["read", "6 agents read", handoffs.length ? "complete" : "active"], ["compared", "Options compared", noAction || currentPlan ? "complete" : "pending"],
+      ["model", "Qwen chose", noAction ? "skipped" : currentPlan ? "complete" : "pending"], ["safe", "Safety checked", noAction || checks.length ? "complete" : "pending"],
+      ["applied", "Applied", noAction ? "skipped" : String(currentPlan?.status).toUpperCase() === "APPLIED" ? "complete" : "active"], ["watching", "Watching", noAction || currentPlan ? "active" : "pending"],
+    ].map(([id, label, stageStatus]) => ({ id, label, status: stageStatus })),
+    findings: handoffs.map((handoff) => ({ agent_id: handoff.from_agent, agent: agentLabel(handoff.from_agent), summary: handoff.summary, based_on_version: first(handoff.input_state_version, handoff.state_version, currentPlan?.based_on_version), evidence_ids: list(handoff.evidence_ids), handoff_id: handoff.id })),
+    candidates: list(currentPlan?.safe_candidate_set).map((candidate) => ({ ...candidate, label: humanize(candidate.strategy), selected: String(candidate.id) === selectedId, shown_to_model: allowlisted.includes(String(candidate.id)), reason: String(candidate.id) === selectedId ? "Selected from the server-approved set." : allowlisted.includes(String(candidate.id)) ? "Approved finalist; not selected." : "Safe, but outside the model context window." })),
+    selection: { source: currentPlan?.selected_by, selected_candidate_id: selectedId || null, allowlisted_candidate_ids: allowlisted, summary: currentPlan?.summary, explanation: noAction ? "No model call was needed because no material intervention passed the decision guard." : allowlisted.length === 1 ? "Qwen confirmed the only safe option for this situation. It still could not execute it." : `Qwen compared ${allowlisted.length} safe options and chose one. It could not invent an option or execute it.` },
+    guards: checks.map((check) => ({ id: check.id, label: humanize(check.id), passed: check.passed === true, detail: check.detail, evidence_ids: list(check.evidence_ids) })),
+    no_action_reason: noAction ? first(item.summary, "The scan found no material change that justified another intervention.") : null,
+    outcome: { available: Boolean(currentPlan), applied: String(currentPlan?.status).toUpperCase() === "APPLIED", baseline_delay_minutes: baseline, projected_delay_minutes: projected, recovered_minutes: number(currentPlan?.recovered_minutes, Math.max(0, baseline - projected)), protected_flight_ids: list(currentPlan?.actions).filter((action) => String(action.type) === "PROTECT_ROTATION").map((action) => first(action.affected_flight_id, action.target_id)).filter(Boolean), qualifier: "Projected under the bounded replay assumptions; not measured real-world impact." },
+    next_checkpoint: { minute: replayMinute + number(snapshot.replanning?.interval_minutes, 5), label: formatClock(replayMinute + number(snapshot.replanning?.interval_minutes, 5)), detail: `Next scheduled graph scan at ${formatClock(replayMinute + number(snapshot.replanning?.interval_minutes, 5))}, or immediately if connected state changes.` },
+    technical: { plan_id: currentPlan?.id, evidence_ids: [...new Set(handoffs.flatMap((handoff) => list(handoff.evidence_ids)))] },
+  };
+}
+
+function candidateLabel(candidate) { return first(candidate.label, humanize(candidate.strategy), "Recovery option"); }
+function candidateExplanation(candidate) {
+  const labels = {
+    TURNAROUND_RECOVERY: "Resequence connected turnaround tasks.",
+    FLOW_BALANCE: "Adjust departure flow for the rotation.",
+    GATE_SWAP: "Move the rotation to a compatible gate.",
+  };
+  return first(labels[String(candidate?.strategy || "").toUpperCase()], "Bounded recovery strategy.");
+}
+
+function guardLabel(guard) {
+  const labels = {
+    CURRENT_GRAPH_STATE: "Same graph version", CURRENT_POLICY_AUTHORITY: "Current authority", CURRENT_KNOWLEDGE: "Fresh procedure",
+    TARGETS_EXIST: "Required links exist", EXECUTION_FREEZE: "Freeze window clear", MINIMUM_BENEFIT: "Benefit threshold met", CHURN_GUARD: "Churn guard clear",
+  };
+  return first(guard.label, labels[String(guard.id)], humanize(guard.id));
+}
+
+const STORY_SECTION_BY_PHASE = {
+  trigger: "why-now", findings: "agent-findings", options: "candidate-options",
+  choice: "model-choice", guards: "safety-checks", outcome: "decision-outcome", next: "next-check",
+};
+
+function setStoryPhase(phase = "trigger") {
+  const nextPhase = STORY_SECTION_BY_PHASE[phase] ? phase : "trigger";
+  ui.activeStoryPhase = nextPhase;
+  Object.entries(STORY_SECTION_BY_PHASE).forEach(([key, id]) => {
+    const section = $(id); if (!section) return;
+    const selected = key === nextPhase;
+    section.classList.toggle("story-active", selected);
+    section.setAttribute("aria-hidden", String(!selected));
+  });
+  document.querySelectorAll("#stage-rail > [data-phase]").forEach((step) => {
+    const selected = step.dataset.phase === nextPhase;
+    step.classList.toggle("viewing", selected);
+    step.setAttribute("aria-current", selected ? "step" : "false");
+  });
+}
+
+function renderDecisionStory(story = ui.decisionStory) {
+  if (!story) {
+    ui.storyPhaseEpisode = null; ui.activeStoryPhase = "trigger";
+    $("story-headline").textContent = "GroundGraph is watching the connected operation";
+    $("story-subtitle").textContent = "No intervention is needed yet.";
+    $("story-trigger-title").textContent = "Waiting for a material graph change";
+    $("story-trigger-time").textContent = formatClock(ui.snapshot?.clock?.minute || 0);
+    $("story-trigger-copy").textContent = "Scheduled and event-driven checks continue in the background.";
+    $("findings-count").textContent = "0 / 6";
+    $("story-candidates").innerHTML = '<p class="empty-copy">No recovery comparison is needed yet.</p>';
+    $("options-count").textContent = "0 options";
+    $("story-choice-title").textContent = "No model choice yet";
+    $("story-selector").textContent = "WAITING";
+    $("story-guards").innerHTML = ""; $("guards-count").textContent = "0 / 7";
+    $("story-result-title").textContent = "No action applied"; $("story-result-status").textContent = "WATCHING";
+    $("story-outcome").innerHTML = '<span><small>Downstream delay</small><strong>—</strong></span><span><small>Gate waiting</small><strong>—</strong></span><span><small>Protected flights</small><strong>—</strong></span>';
+    document.querySelectorAll("#stage-rail > span").forEach((node, index) => { node.classList.toggle("active", index === 0); node.classList.remove("complete"); });
+    setStoryPhase("trigger");
+    return;
+  }
+  const storyEpisode = String(first(story.episode_id, `cycle-${number(story.cycle)}`));
+  if (ui.storyPhaseEpisode !== storyEpisode) { ui.storyPhaseEpisode = storyEpisode; ui.activeStoryPhase = "trigger"; }
+  const noAction = String(story.result_kind).toUpperCase() === "NO_ACTION";
+  const applied = String(story.result_kind).toUpperCase() === "APPLIED";
+  $("cycle-number").textContent = String(number(story.cycle)).padStart(2, "0");
+  $("story-headline").textContent = first(story.headline, story.summary, "Decision review complete");
+  $("story-subtitle").textContent = noAction ? first(story.no_action_reason, story.summary, "No operational change was justified.") : `Graph v${number(story.graph_version)} · ${applied ? "applied in replay" : "awaiting operator approval"}`;
+  $("story-trigger-title").textContent = first(story.trigger?.title, story.trigger?.kind, "Connected state changed");
+  $("story-trigger-time").textContent = first(story.replay_time, formatClock(story.replay_minute));
+  $("story-trigger-copy").textContent = first(story.why_now?.explanation, story.trigger?.detail, story.summary, "This change opened a new decision review.");
+
+  const findings = list(story.findings); $("findings-count").textContent = `${findings.length} / 6`; $("findings-title").textContent = findings.length ? "All six agents finished" : "No specialist findings were returned";
+  Object.entries(STORY_AGENT_KEY).forEach(([agentId, key]) => {
+    const finding = findings.find((item) => String(first(item.agent_id, item.from_agent)).toUpperCase() === agentId);
+    const message = $(`${key === "turn" ? "turn" : key}-agent-message`); if (message && finding) message.textContent = first(finding.summary, finding.recommendation, "Read complete");
+    const card = document.querySelector(`[data-agent="${key}"]`); if (card) { card.classList.toggle("complete", Boolean(finding)); card.title = finding ? `${first(finding.summary, "Read complete")}\nGraph v${first(finding.based_on_version, story.graph_version)}` : "Awaiting this specialist"; }
+  });
+
+  const candidates = list(story.candidates); const shortlist = new Set(list(story.selection?.allowlisted_candidate_ids).map(String));
+  $("options-title").textContent = noAction ? "No recovery option cleared the material-change guard" : "Safe strategies compared";
+  $("options-count").textContent = `${candidates.length} option${candidates.length === 1 ? "" : "s"}`;
+  $("story-candidates").innerHTML = candidates.length ? candidates.map((candidate) => {
+    return `<article class="story-candidate"><span><b>${escapeHtml(candidateLabel(candidate))}</b><small>${escapeHtml(candidateExplanation(candidate))}</small></span><strong>${number(candidate.recovered_minutes)} min<small> recovery</small></strong><strong>${number(candidate.burden_minutes)} min<small> burden</small></strong></article>`;
+  }).join("") : `<p class="empty-copy">${escapeHtml(first(story.no_action_reason, "No candidate was needed for this scan."))}</p>`;
+
+  const selected = candidates.find((candidate) => candidate.selected === true || String(candidate.id) === String(story.selection?.selected_candidate_id));
+  const selection = selectionAttribution(story.selection?.source);
+  $("story-choice-title").textContent = noAction ? "Model call skipped — no material action was needed" : selected ? `${candidateLabel(selected)} selected` : "No allowlisted choice was returned";
+  $("story-selector").textContent = noAction ? "SKIPPED" : selection.label;
+  $("story-choice-copy").textContent = first(story.selection?.explanation, story.selection?.summary, noAction ? story.no_action_reason : "The model was restricted to the server-approved shortlist.");
+  const comparedCount = list(story.selection?.allowlisted_candidate_ids).length;
+  $("coordinator-message").textContent = noAction ? "Skipped — no action needed" : `${comparedCount} safe option${comparedCount === 1 ? "" : "s"} compared`;
+
+  const guards = list(story.guards); const passed = guards.filter((guard) => guard.passed === true).length;
+  $("guards-title").textContent = noAction ? "Guardrails stopped an unnecessary intervention" : guards.length && passed === guards.length ? "Every execution guard passed" : "Execution remains blocked until every guard passes";
+  $("guards-count").textContent = guards.length ? `${passed} / ${guards.length}` : noAction ? "NO APPLY" : "0 / 7";
+  $("story-guards").innerHTML = guards.length ? guards.map((guard) => `<article class="guard-item ${guard.passed ? "" : "failed"}" title="${escapeHtml(first(guard.detail, "Validation check"))}"><i>${guard.passed ? "✓" : "!"}</i><span><strong>${escapeHtml(guardLabel(guard))}</strong><small>${escapeHtml(first(guard.detail, guard.passed ? "Passed" : "Blocked"))}</small></span></article>`).join("") : `<p class="empty-copy">${escapeHtml(first(story.no_action_reason, "No execution validation was needed."))}</p>`;
+
+  const outcome = obj(story.outcome); const baseline = number(outcome.baseline_delay_minutes); const projected = number(outcome.projected_delay_minutes, baseline); const protectedFlights = list(outcome.protected_flight_ids);
+  $("story-result-title").textContent = noAction ? "Current operation held steady" : applied ? `${candidateLabel(selected || {})} applied in the replay` : "Validated plan is waiting for approval";
+  $("story-result-status").textContent = noAction ? "NO ACTION" : applied ? "APPLIED" : "PROPOSED";
+  $("story-outcome").innerHTML = `<span><small>Downstream delay</small><strong>${outcome.available ? `${baseline} → ${projected} min` : "—"}</strong></span><span><small>Projected recovery</small><strong>${outcome.available ? `${number(outcome.recovered_minutes)} min` : "—"}</strong></span><span><small>Protected flights</small><strong>${outcome.available ? protectedFlights.length : "—"}</strong></span>`;
+  $("story-result-copy").textContent = noAction ? first(story.no_action_reason, story.summary, "No material change justified intervention.") : first(outcome.qualifier, "Projected under the bounded replay assumptions; not measured real-world impact.");
+  $("story-next-title").textContent = noAction ? "Monitoring continues without operational churn" : applied ? "The applied plan stays under graph watch" : "The proposed plan stays under graph watch";
+  $("story-next-time").textContent = first(story.next_checkpoint?.label, "+5 min");
+  $("story-next-copy").textContent = first(story.next_checkpoint?.detail, "GroundGraph replans on schedule or immediately when connected state changes.");
+
+  const stages = list(story.stages); const stageMap = { detected: "trigger", read: "findings", compared: "options", model: "choice", safe: "guards", applied: "outcome", watching: "next" };
+  document.querySelectorAll("#stage-rail > span").forEach((node) => { const stage = stages.find((item) => stageMap[item.id] === node.dataset.phase); const status = String(stage?.status || "pending").toLowerCase(); node.classList.toggle("complete", status === "complete" || status === "skipped"); node.classList.toggle("active", status === "active"); node.title = stage ? `${stage.label}: ${status}` : "Pending"; });
+  if (!document.querySelector("#stage-rail > span.active")) document.querySelector("#stage-rail > span:last-child")?.classList.add("active");
+  setStoryPhase(ui.activeStoryPhase);
+
+  if (ui.selectedEpisode && !ui.followLive) {
+    $("incident-kicker").textContent = `INSPECTING DECISION ${String(number(story.cycle)).padStart(2, "0")}`;
+    $("incident-title").textContent = first(story.trigger?.title, story.headline);
+    $("incident-detail").textContent = first(story.why_now?.explanation, story.trigger?.detail, story.summary);
+    $("delay-before").textContent = outcome.available ? `${baseline}m` : "—"; $("delay-after").textContent = outcome.available ? `${projected}m` : "—";
+    $("delay-delta").textContent = noAction ? "no material change" : `${number(outcome.recovered_minutes)} min projected recovery`;
+    $("checks-value").textContent = noAction ? "NO APPLY" : guards.length ? `${passed} / ${guards.length}` : "WAITING";
+    $("checks-detail").textContent = noAction ? "intervention deliberately skipped" : passed === guards.length ? "all execution guards passed" : "execution blocked";
+  }
+  const affectedFlight = first(story.why_now?.outbound_flight_id, list(story.affected?.flight_ids)[0]); if (affectedFlight) ui.map?.setSelectedFlight(affectedFlight);
+}
+
+function decisionLogTime(item) {
+  const episodeId = String(historyEpisodeId(item));
+  if (String(ui.decisionStory?.episode_id) === episodeId && ui.decisionStory?.replay_time) return ui.decisionStory.replay_time;
+  if (item.replay_minute !== undefined && item.replay_minute !== null) return formatClock(number(item.replay_minute));
+  const created = item.created_at ? new Date(item.created_at) : null;
+  return created && !Number.isNaN(created.getTime()) ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }).format(created) : `Cycle ${String(number(item.cycle)).padStart(2, "0")}`;
+}
+
+function renderDecisionLog() {
+  const history = list(ui.snapshot?.replanning?.history); const latest = history[0];
+  if (ui.followLive && latest) ui.selectedEpisode = String(historyEpisodeId(latest));
+  if (ui.selectedEpisode && !history.some((item) => String(historyEpisodeId(item)) === String(ui.selectedEpisode))) { ui.selectedEpisode = latest ? String(historyEpisodeId(latest)) : null; ui.followLive = true; ui.decisionStory = null; }
+  $("decision-log").innerHTML = history.length ? history.map((item, index) => {
+    const id = String(historyEpisodeId(item)); const status = String(first(item.status, "NO_ACTION_REQUIRED")).toUpperCase(); const applied = status.includes("APPLIED"); const noAction = status.includes("NO_ACTION") || status.includes("NO_CHANGE") || status.includes("MONITOR");
+    const label = applied ? "Recovery applied" : noAction ? "No action — kept stable" : status.includes("PROPOSED") ? "Plan ready for approval" : humanize(status);
+    const selected = String(ui.selectedEpisode) === id;
+    return `<button type="button" class="decision-log-card ${applied ? "applied" : noAction ? "no-action" : "action"} ${selected ? "selected" : ""}" data-episode="${escapeHtml(id)}" data-status="${escapeHtml(status)}" aria-pressed="${selected}"><i></i><span><strong>${escapeHtml(`${decisionLogTime(item)} · ${plainTrigger(item.trigger)}`)}</strong><small>${escapeHtml(first(item.summary, "Graph state checked."))}</small><em>${escapeHtml(label)}${index === 0 ? " · latest" : ""}</em></span></button>`;
+  }).join("") : '<span class="log-empty">The first scheduled check will appear here.</span>';
+  const selectedItem = history.find((item) => String(historyEpisodeId(item)) === String(ui.selectedEpisode));
+  if (!ui.decisionStory || String(ui.decisionStory.episode_id) !== String(ui.selectedEpisode)) ui.decisionStory = deriveDecisionStory(ui.snapshot, selectedItem);
+  renderDecisionStory(ui.decisionStory);
+}
+
+async function loadDecisionStory(episodeId, { followLive = false } = {}) {
+  if (!episodeId) return;
+  const requestId = ++ui.storyRequest; ui.selectedEpisode = String(episodeId); ui.followLive = followLive; renderDecisionLog();
+  $("story-subtitle").textContent = "Loading the episode-scoped explanation from FalkorDB…";
+  try {
+    const payload = await request(`/api/decision-story?episode_id=${encodeURIComponent(episodeId)}`, { timeout: 15000 });
+    if (requestId !== ui.storyRequest) return;
+    const story = obj(first(payload.decision_story, payload.story, payload));
+    if (story.ok !== true || !story.episode_id || !story.result_kind) throw Object.assign(new Error("Episode detail was not returned"), { status: 404 });
+    ui.decisionStory = story; renderDecisionLog();
+    const scroll = $("decision-story"); scroll.classList.remove("trace-replay"); void scroll.offsetWidth; scroll.classList.add("trace-replay");
+  } catch (error) {
+    if (requestId !== ui.storyRequest) return;
+    const selected = list(ui.snapshot.replanning?.history).find((item) => String(historyEpisodeId(item)) === String(episodeId));
+    ui.decisionStory = deriveDecisionStory(ui.snapshot, selected); renderDecisionLog();
+    if (number(error?.status) !== 404) showToast("Using the snapshot explanation while episode detail reconnects");
+  }
+}
+
+function renderAirports() {
+  const menu = $("airport-menu"); if (!menu) return;
+  const active = String(ui.snapshot?.scenario?.airport || "").toUpperCase();
+  menu.innerHTML = ui.airports.length ? ui.airports.map((airport) => `<button type="button" class="airport-option ${String(airport.code).toUpperCase() === active ? "active" : ""}" role="option" data-airport="${escapeHtml(String(airport.code).toUpperCase())}" aria-selected="${String(airport.code).toUpperCase() === active}"><i>${escapeHtml(airport.code)}</i><span><strong>${escapeHtml(first(airport.label, airport.name, airport.code))}</strong><small>${escapeHtml(first(airport.summary, "Bounded historical replay"))}</small></span><em>${String(airport.code).toUpperCase() === active ? "ACTIVE" : "OPEN"}</em></button>`).join("") : '<span class="log-empty">Airport catalog unavailable.</span>';
+  menu.hidden = !ui.airportMenuOpen;
+  $("airport-switcher").setAttribute("aria-expanded", String(ui.airportMenuOpen));
+}
+
+async function loadAirports() {
+  try { const payload = obj(await request("/api/airports", { timeout: 8000 })); ui.airports = list(payload.airports); renderAirports(); }
+  catch { ui.airports = [{ code: ui.snapshot.scenario.airport, name: ui.snapshot.scenario.airport_name, label: ui.snapshot.scenario.replay_label, summary: ui.snapshot.scenario.description }]; renderAirports(); }
+}
+
+async function selectAirport(code) {
+  if (!ui.backend || ui.busy || !code || String(code).toUpperCase() === String(ui.snapshot.scenario.airport).toUpperCase()) { ui.airportMenuOpen = false; renderAirports(); return; }
+  const wasPlaying = ui.playing; setPlaying(false); ui.airportMenuOpen = false; renderAirports(); setBusy(true, `Loading ${String(code).toUpperCase()} replay`);
+  try {
+    const snapshot = requireHealthySnapshot(await request("/api/airports/select", { method: "POST", body: JSON.stringify({ airport: String(code).toUpperCase() }), timeout: 90000 }));
+    ui.selectedEpisode = null; ui.decisionStory = null; ui.followLive = true; ui.selectedCycle = null; ui.policyDemo = null;
+    renderSnapshot(snapshot); await loadAirports(); setPlaying(false); showToast(`${snapshot.scenario.airport} replay loaded from its own FalkorDB graph`);
+  } catch (error) { if (!error?.status || number(error.status) >= 500) enterEngineUnavailable(error, { preserveSnapshot: true }); else showToast(first(error.message, "Could not switch airport")); }
+  finally { setBusy(false); if (wasPlaying && ui.backend) setPlaying(true); }
+}
+
 function graphPathLabel(item) {
   if (typeof item === "string") return item;
   const edge = obj(item); return first(edge.label, edge.path, [edge.source, edge.type, edge.target].filter(Boolean).join(" → "), edge.id, "Graph evidence");
@@ -562,7 +824,7 @@ async function setAutonomy(enabled) {
     showToast(result.replanning?.auto_apply === true ? "Guarded auto-apply enabled on the server" : "Plans will wait for operator approval");
   } catch (error) {
     toggle.checked = ui.snapshot.replanning.auto_apply === true;
-    $("auto-apply-state").textContent = `${toggle.checked ? "server on" : "waiting for approval"} · ${number(ui.snapshot.replanning.execution_freeze_minutes, 10)}-min churn guard`;
+    $("auto-apply-state").textContent = toggle.checked ? "ON" : "OFF";
     if (!error?.status || number(error.status) >= 500) {
       enterEngineUnavailable(error, { preserveSnapshot: true });
       showToast("Engine unavailable — replay frozen");
@@ -571,9 +833,13 @@ async function setAutonomy(enabled) {
 }
 
 function renderTab() {
+  const labels = { plan: "Recovery plan", cycles: "Six-agent trace", evidence: "Graph and policy proof", memory: "Episodic memory" };
   ["plan", "cycles", "evidence", "memory"].forEach((name) => {
     const button = document.querySelector(`[data-tab="${name}"]`); if (button) { const active = name === ui.selectedTab; button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active)); }
   });
+  const drawer = $("proof-drawer");
+  if (drawer) drawer.hidden = !ui.selectedTab;
+  if (ui.selectedTab && $("proof-drawer-title")) $("proof-drawer-title").textContent = labels[ui.selectedTab] || "Decision detail";
   $("waiting-state").hidden = ui.selectedTab !== "plan" || Boolean(ui.snapshot.current_plan);
   $("plan-stage").hidden = ui.selectedTab !== "plan" || !ui.snapshot.current_plan;
   $("cycles-stage").hidden = ui.selectedTab !== "cycles";
@@ -586,7 +852,7 @@ function updatePrimaryAction() {
   if (!ui.backend) { button.disabled = true; $("primary-action-label").textContent = "FalkorDB required"; return; }
   if (ui.busy) { button.disabled = true; $("primary-action-label").textContent = "Replanning…"; return; }
   button.disabled = false;
-  if (plan && status === "PROPOSED") $("primary-action-label").textContent = "Apply validated plan";
+  if (plan && status === "PROPOSED") $("primary-action-label").textContent = "Apply plan";
   else if (plan && status === "APPLIED") $("primary-action-label").textContent = "View latest cycle";
   else $("primary-action-label").textContent = "Run replan now";
 }
@@ -665,7 +931,7 @@ function enterEngineUnavailable(error, { preserveSnapshot = false } = {}) {
 
 function renderSnapshot(snapshot, { keepVisualTime = false } = {}) {
   ui.snapshot = normalizeSnapshot(snapshot); ui.targetMinute = ui.snapshot.clock.minute; if (!keepVisualTime) ui.visualMinute = ui.targetMinute;
-  renderRuntime(); renderScenario(); renderWeather(); renderIncident(); renderMetrics(); renderAgents(); renderReplanning(); renderPlan(); renderEvidenceAndMemory(); renderCausalPath(); renderTrackProof(); renderTab(); updatePrimaryAction();
+  renderRuntime(); renderScenario(); renderWeather(); renderIncident(); renderMetrics(); renderAgents(); renderReplanning(); renderPlan(); renderEvidenceAndMemory(); renderCausalPath(); renderTrackProof(); renderDecisionLog(); renderAirports(); renderTab(); updatePrimaryAction();
   ui.map?.setSnapshot(ui.snapshot); ui.map?.setTime(ui.visualMinute);
   $("footer-status").textContent = ui.backend
     ? `GroundGraph · cycle ${ui.snapshot.clock.cycle} · graph v${ui.snapshot.state_version} · FalkorDB-backed replay`
@@ -674,6 +940,10 @@ function renderSnapshot(snapshot, { keepVisualTime = false } = {}) {
   const current = ui.snapshot.current_plan; const status = String(current?.status || "").toUpperCase();
   const historical = Boolean(current?.display_only || current?.historical || current?.is_current === false);
   if (!historical && status === "PROPOSED" && ui.snapshot.replanning.auto_apply !== true) setPlaying(false);
+  const latestEpisode = historyEpisodeId(list(ui.snapshot.replanning?.history)[0]);
+  if (latestEpisode && ui.followLive) {
+    queueMicrotask(() => loadDecisionStory(latestEpisode, { followLive: true }));
+  }
 }
 
 function setBusy(active, label = "Specialists are reading FalkorDB") {
@@ -685,7 +955,7 @@ function setBusy(active, label = "Specialists are reading FalkorDB") {
 async function mutation(path, body) {
   if (ui.busy) return null;
   if (!ui.backend) { enterEngineUnavailable(new Error("FalkorDB is required for operational actions.")); return null; }
-  setBusy(true);
+  ui.followLive = true; setBusy(true);
   try {
     const result = requireHealthySnapshot(await request(path, { method: "POST", body: JSON.stringify(body || {}), timeout: 90000 }));
     renderSnapshot(result, { keepVisualTime: path.includes("tick") }); return result;
@@ -779,7 +1049,7 @@ async function publishPolicyUpdate(policyId) {
   finally { setBusy(false); if (wasPlaying && ui.backend) setPlaying(true); }
 }
 async function resetReplay() {
-  ui.policyDemo = null; ui.selectedCycle = null; setPlaying(false); setBusy(true, "Resetting replay state");
+  ui.policyDemo = null; ui.selectedCycle = null; ui.selectedEpisode = null; ui.decisionStory = null; ui.followLive = true; setPlaying(false); setBusy(true, "Resetting replay state");
   if (!ui.backend) { setBusy(false); enterEngineUnavailable(new Error("FalkorDB is required to reset the replay.")); return; }
   try { const snapshot = requireHealthySnapshot(await request("/api/reset", { method: "POST", body: "{}" })); renderSnapshot(snapshot); setPlaying(false); showToast("Replay restarted and paused at 08:00"); }
   catch (error) { enterEngineUnavailable(error, { preserveSnapshot: true }); showToast("Engine unavailable — replay frozen"); } finally { setBusy(false); }
@@ -835,8 +1105,20 @@ function bindInteractions() {
   });
   $("auto-apply").addEventListener("change", (event) => setAutonomy(event.target.checked));
   document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => { ui.selectedTab = button.dataset.tab; renderTab(); }));
+  $("proof-close").addEventListener("click", () => { ui.selectedTab = null; renderTab(); });
+  $("airport-switcher").addEventListener("click", (event) => { event.stopPropagation(); ui.airportMenuOpen = !ui.airportMenuOpen; renderAirports(); });
+  $("airport-menu").addEventListener("click", (event) => { const option = event.target.closest("[data-airport]"); if (option) selectAirport(option.dataset.airport); });
+  $("decision-log").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-episode]"); if (!row) return;
+    const latest = historyEpisodeId(list(ui.snapshot.replanning?.history)[0]);
+    loadDecisionStory(row.dataset.episode, { followLive: String(row.dataset.episode) === String(latest) });
+  });
+  $("stage-rail").addEventListener("click", (event) => {
+    const step = event.target.closest("[data-phase]"); if (!step) return;
+    setStoryPhase(step.dataset.phase);
+  });
   $("causal-path").addEventListener("click", (event) => { const node = event.target.closest(".causal-node"); if (!node) return; document.querySelectorAll(".causal-node").forEach((item) => item.classList.toggle("active", item === node)); $("causal-caption").textContent = node.dataset.detail; ui.map?.setSelectedFlight(node.dataset.node); });
-  $("cycles-stage").addEventListener("click", (event) => { const row = event.target.closest(".cycle-row"); if (!row) return; ui.selectedCycle = first(row.dataset.episode, row.dataset.cycle); renderReplanning(); const item = list(ui.snapshot.replanning.history).find((entry) => String(first(entry.episode_id, entry.id, entry.plan_id, entry.cycle)) === String(ui.selectedCycle)); if (item) $("causal-caption").textContent = `Cycle ${item.cycle} · ${shortStatus(item.status)} · ${item.summary}`; });
+  $("cycles-stage").addEventListener("click", (event) => { const row = event.target.closest(".cycle-row"); if (!row) return; ui.selectedCycle = first(row.dataset.episode, row.dataset.cycle); renderReplanning(); const item = list(ui.snapshot.replanning.history).find((entry) => String(first(entry.episode_id, entry.id, entry.plan_id, entry.cycle)) === String(ui.selectedCycle)); if (item) { $("causal-caption").textContent = `Cycle ${item.cycle} · ${shortStatus(item.status)} · ${item.summary}`; loadDecisionStory(historyEpisodeId(item), { followLive: false }); } });
   $("evidence-stage").addEventListener("click", (event) => {
     const publish = event.target.closest(".publish-policy-update");
     if (publish) { publishPolicyUpdate(publish.dataset.policyId); return; }
@@ -845,6 +1127,8 @@ function bindInteractions() {
   $("action-list").addEventListener("click", (event) => { const row = event.target.closest(".action-item"); if (row?.dataset.flight) { ui.map?.setSelectedFlight(row.dataset.flight); showToast("Highlighted the action target and its graph path"); } });
   document.querySelectorAll("[data-brain-question]").forEach((button) => button.addEventListener("click", () => askOperationsBrain(button.dataset.brainQuestion)));
   $("brain-form").addEventListener("submit", (event) => { event.preventDefault(); askOperationsBrain($("brain-question").value); });
+  document.addEventListener("click", (event) => { const picker = $("airport-selector") || document.querySelector(".airport-picker"); if (ui.airportMenuOpen && (!picker || !picker.contains(event.target))) { ui.airportMenuOpen = false; renderAirports(); } });
+  document.addEventListener("keydown", (event) => { if (event.key !== "Escape") return; ui.airportMenuOpen = false; ui.selectedTab = null; renderAirports(); renderTab(); });
 }
 
 async function boot() {
@@ -853,7 +1137,7 @@ async function boot() {
   try {
     const [snapshotResult, healthResult] = await Promise.all([request("/api/snapshot", { timeout: 3500 }), request("/api/health", { timeout: 3500 })]);
     const snapshot = requireHealthySnapshot(snapshotResult); ui.health = requireHealthyRuntime(healthResult); ui.backend = true; ui.source = "api"; ui.unavailableReason = "";
-    renderSnapshot(snapshot); setPlaying(false); syncEngineAvailability();
+    renderSnapshot(snapshot); await loadAirports(); setPlaying(false); syncEngineAvailability();
   } catch (error) { enterEngineUnavailable(error); }
   ui.tickTimer = setInterval(() => advance(ui.speed), 1000);
   ui.healthTimer = setInterval(verifyRuntimeAvailability, 5000);

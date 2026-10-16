@@ -1,0 +1,682 @@
+{
+  "scenario": {
+    "id": "SFO-2024-01-06-WIND-RAIN-PM",
+    "name": "San Francisco wind and rain operations recovery",
+    "airport": "SFO",
+    "airport_name": "San Francisco International Airport",
+    "timezone": "America/Los_Angeles",
+    "date": "2024-01-06",
+    "start_at": "2024-01-06T13:00:00-08:00",
+    "end_at": "2024-01-06T17:00:00-08:00",
+    "initial_clock": "13:00",
+    "duration_minutes": 240,
+    "planning_interval_minutes": 5,
+    "planning_horizon_minutes": 90,
+    "execution_freeze_minutes": 10,
+    "description": "A bounded afternoon replay with exact public schedule, weather, and runway fields plus clearly labeled modeled operating assumptions."
+  },
+  "display": {
+    "accent": "cyan",
+    "hazard_label": "STRONG WIND + HEAVY RAIN",
+    "map_variant": "bay-parallel-runways",
+    "runway_orientation_degrees": 105,
+    "runway_order": [
+      "RWY-10L-28R",
+      "RWY-10R-28L",
+      "RWY-01R-19L"
+    ],
+    "gate_order": [
+      "E2",
+      "E4",
+      "E6",
+      "E8"
+    ]
+  },
+  "resources": {
+    "runways": [
+      {
+        "id": "RWY-10L-28R",
+        "label": "10L / 28R",
+        "length_ft": 11870,
+        "role": "ARRIVAL",
+        "capacity_per_hour": 22,
+        "status": "LIMITED",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KSFO:10L/28R",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
+      },
+      {
+        "id": "RWY-10R-28L",
+        "label": "10R / 28L",
+        "length_ft": 11381,
+        "role": "DEPARTURE",
+        "capacity_per_hour": 26,
+        "status": "OPEN",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KSFO:10R/28L",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
+      },
+      {
+        "id": "RWY-01R-19L",
+        "label": "01R / 19L",
+        "length_ft": 8650,
+        "role": "MIXED",
+        "capacity_per_hour": 16,
+        "status": "STANDBY",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KSFO:01R/19L",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
+      }
+    ],
+    "gates": [
+      {
+        "id": "E2",
+        "terminal": "Terminal-3-E",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "E4",
+        "terminal": "Terminal-3-E",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "E6",
+        "terminal": "Terminal-3-E",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "E8",
+        "terminal": "Terminal-3-E",
+        "status": "AVAILABLE",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      }
+    ]
+  },
+  "flights": [
+    {
+      "id": "UA1561-IN",
+      "callsign": "UA1561",
+      "kind": "INBOUND",
+      "origin": "DEN",
+      "destination": "SFO",
+      "scheduled_minute": 19,
+      "gate": "E2",
+      "runway": "RWY-10L-28R",
+      "status": "APPROACH",
+      "rotation_id": "ROT-UA1561-UA1010",
+      "turn_minutes": 45,
+      "bag_risk": "LOW",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-06:UA1561:DEN:SFO",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "UA1010-OUT",
+      "callsign": "UA1010",
+      "kind": "OUTBOUND",
+      "origin": "SFO",
+      "destination": "IND",
+      "scheduled_minute": 84,
+      "gate": "E2",
+      "runway": "RWY-10R-28L",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-UA1561-UA1010",
+      "turn_minutes": 45,
+      "bag_risk": "MEDIUM",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-06:UA1010:SFO:IND",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "UA2099-IN",
+      "callsign": "UA2099",
+      "kind": "INBOUND",
+      "origin": "ORD",
+      "destination": "SFO",
+      "scheduled_minute": 34,
+      "gate": "E4",
+      "runway": "RWY-10L-28R",
+      "status": "APPROACH",
+      "rotation_id": "ROT-UA2099-UA792",
+      "turn_minutes": 45,
+      "bag_risk": "MEDIUM",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-06:UA2099:ORD:SFO",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "UA792-OUT",
+      "callsign": "UA792",
+      "kind": "OUTBOUND",
+      "origin": "SFO",
+      "destination": "IAH",
+      "scheduled_minute": 101,
+      "gate": "E4",
+      "runway": "RWY-10R-28L",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-UA2099-UA792",
+      "turn_minutes": 45,
+      "bag_risk": "HIGH",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-06:UA792:SFO:IAH",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "UA2263-IN",
+      "callsign": "UA2263",
+      "kind": "INBOUND",
+      "origin": "IAH",
+      "destination": "SFO",
+      "scheduled_minute": 114,
+      "gate": "E6",
+      "runway": "RWY-10L-28R",
+      "status": "APPROACH",
+      "rotation_id": "ROT-UA2263-UA566",
+      "turn_minutes": 45,
+      "bag_risk": "HIGH",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-06:UA2263:IAH:SFO",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "UA566-OUT",
+      "callsign": "UA566",
+      "kind": "OUTBOUND",
+      "origin": "SFO",
+      "destination": "DEN",
+      "scheduled_minute": 182,
+      "gate": "E6",
+      "runway": "RWY-10R-28L",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-UA2263-UA566",
+      "turn_minutes": 45,
+      "bag_risk": "MEDIUM",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-06:UA566:SFO:DEN",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    }
+  ],
+  "turnarounds": [
+    {
+      "id": "TURN-ROT-UA1561-UA1010",
+      "rotation_id": "ROT-UA1561-UA1010",
+      "inbound_flight_id": "UA1561-IN",
+      "outbound_flight_id": "UA1010-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "TURN-ROT-UA2099-UA792",
+      "rotation_id": "ROT-UA2099-UA792",
+      "inbound_flight_id": "UA2099-IN",
+      "outbound_flight_id": "UA792-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "TURN-ROT-UA2263-UA566",
+      "rotation_id": "ROT-UA2263-UA566",
+      "inbound_flight_id": "UA2263-IN",
+      "outbound_flight_id": "UA566-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    }
+  ],
+  "turnaround_task_template": [
+    {
+      "key": "DEPLANE",
+      "label": "Deplane and unload",
+      "duration_minutes": 8
+    },
+    {
+      "key": "CABIN_SERVICE",
+      "label": "Cabin service",
+      "duration_minutes": 12
+    },
+    {
+      "key": "BAG_RECONCILIATION",
+      "label": "Baggage reconciliation",
+      "duration_minutes": 25
+    },
+    {
+      "key": "BOARD_CLOSE",
+      "label": "Board and close",
+      "duration_minutes": 12
+    }
+  ],
+  "events": [
+    {
+      "id": "EVT-SFO-WIND-1300",
+      "at_minute": 0,
+      "type": "WIND",
+      "severity": "HIGH",
+      "flight_id": null,
+      "resource_id": "RWY-10L-28R",
+      "delay_minutes": 8,
+      "capacity_delta": -5,
+      "summary": "The 12:56 KSFO METAR reports winds from 240 degrees at 18 knots gusting to 27; the replay starts with a modeled arrival-capacity constraint.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KSFO-2024",
+      "source_record_id": "KSFO:2024-01-06T12:56:00-08:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "at_minute",
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    },
+    {
+      "id": "EVT-SFO-RAIN-1338",
+      "at_minute": 38,
+      "type": "WEATHER_UPDATE",
+      "severity": "HIGH",
+      "flight_id": null,
+      "resource_id": "RWY-10L-28R",
+      "delay_minutes": 13,
+      "capacity_delta": -7,
+      "summary": "The 13:38 KSFO SPECI reports rain, 3 miles visibility and winds gusting to 28 knots; the replay model tightens the arrival sequence.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KSFO-2024",
+      "source_record_id": "KSFO:2024-01-06T13:38:00-08:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    },
+    {
+      "id": "EVT-SFO-BAG-1408",
+      "at_minute": 68,
+      "type": "BAG_RECONCILIATION_DELAY",
+      "severity": "HIGH",
+      "flight_id": "UA2099-IN",
+      "resource_id": "E4",
+      "delay_minutes": 11,
+      "capacity_delta": 0,
+      "summary": "A modeled baggage scan mismatch extends the UA2099 to UA792 turnaround from 45 to 56 minutes.",
+      "source_kind": "MODELED",
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_record_id": "MODELED:BAG_SCAN_MISMATCH:0068",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [],
+      "modeled_fields": [
+        "at_minute",
+        "type",
+        "severity",
+        "flight_id",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary",
+        "source_id"
+      ]
+    },
+    {
+      "id": "EVT-SFO-RAIN-1428",
+      "at_minute": 88,
+      "type": "WEATHER_UPDATE",
+      "severity": "CRITICAL",
+      "flight_id": null,
+      "resource_id": "RWY-10L-28R",
+      "delay_minutes": 18,
+      "capacity_delta": -9,
+      "summary": "The 14:28 KSFO SPECI reports heavy rain, 1 mile visibility and winds from 280 degrees at 22 knots gusting to 31; the replay model triggers an immediate recovery replan.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KSFO-2024",
+      "source_record_id": "KSFO:2024-01-06T14:28:00-08:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    },
+    {
+      "id": "EVT-SFO-WX-1527",
+      "at_minute": 147,
+      "type": "WEATHER_UPDATE",
+      "severity": "MEDIUM",
+      "flight_id": null,
+      "resource_id": "RWY-10L-28R",
+      "delay_minutes": 4,
+      "capacity_delta": 7,
+      "summary": "The 15:27 KSFO SPECI reports 10 miles visibility after the rain ended, with winds still gusting to 26 knots; the replay model restores part of the constrained capacity.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KSFO-2024",
+      "source_record_id": "KSFO:2024-01-06T15:27:00-08:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "id": "SFO-PROC-GATE-1.2",
+      "title": "Gate reassignment during constrained operations",
+      "version": "1.2",
+      "status": "SUPERSEDED",
+      "current": false,
+      "effective_at": "2023-11-01",
+      "owner": "Ramp Control",
+      "source": "Synthetic SFO operations handbook §4.2",
+      "action_types": [
+        "REASSIGN_GATE"
+      ],
+      "rule": "An available compatible gate may be assigned after conflict and tow checks.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "SFO-PROC-GATE-1.3",
+      "title": "Gate reassignment during constrained operations",
+      "version": "1.3",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Ramp Control",
+      "source": "Synthetic SFO operations handbook §4.2",
+      "action_types": [
+        "REASSIGN_GATE"
+      ],
+      "rule": "An available compatible gate may be assigned when the occupancy window is clear and the operation remains inside the planning horizon.",
+      "supersedes": "SFO-PROC-GATE-1.2",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "SFO-PROC-SLOT-2.1",
+      "title": "Departure capacity prioritization",
+      "version": "2.1",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Flow Management",
+      "source": "Synthetic SFO operations handbook §6.1",
+      "action_types": [
+        "RESERVE_SLOT",
+        "RESEQUENCE_DEPARTURE"
+      ],
+      "rule": "A protected departure slot must be unique, open, and linked to the active capacity resource.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "SFO-PROC-TURN-3.0",
+      "title": "Turnaround recovery and rotation protection",
+      "version": "3.0",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Turnaround Control",
+      "source": "Synthetic SFO operations handbook §7.4",
+      "action_types": [
+        "RESEQUENCE_TASKS",
+        "PROTECT_ROTATION"
+      ],
+      "rule": "Independent tasks may run concurrently, while all dependency edges and minimum task durations remain binding.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "SFO-PROC-AUTO-1.0",
+      "title": "Bounded automatic recovery",
+      "version": "1.0",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Airport Operations Center",
+      "source": "Synthetic SFO replay bulletin 2024-01-01",
+      "action_types": [
+        "APPLY_VALIDATED_PLAN"
+      ],
+      "rule": "The system may automatically apply a validated plan only within modeled replay scope, with current graph state and a complete audit trail.",
+      "source_kind": "MODELED"
+    }
+  ],
+  "provenance": [
+    {
+      "id": "BTS-2024-01",
+      "label": "BTS On-Time Performance, January 2024",
+      "url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2024_1.zip",
+      "kind": "OBSERVED_POST_EVENT_ARCHIVE",
+      "source_file_sha256": "fe089b45523f9d4ac0ccd0e176a543d274e914ee5ae5bd384dbaafc7dc06ebfd",
+      "decision_boundary": "Only flight identity, route, direction, and scheduled local movement time enter the replay. Actual delays, cancellations, diversions, and arrival/departure outcomes are excluded."
+    },
+    {
+      "id": "NOAA-KSFO-2024",
+      "label": "NOAA Global Hourly KSFO observations, 2024",
+      "url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2024/72494023234.csv",
+      "kind": "OBSERVED",
+      "source_file_sha256": "d88a869e9a37e80c94a70d8dc038038f75d58146b2c752a2a3fb6c8f36bf0dcd",
+      "decision_boundary": "Each observation becomes eligible only at its replay time. Every capacity and delay effect remains a GroundGraph modeled assumption."
+    },
+    {
+      "id": "FAA-NASR-2023-12-28",
+      "label": "FAA NASR airport and runway records",
+      "url": "https://nfdc.faa.gov/webContent/28DaySub/extra/28_Dec_2023_APT_CSV.zip",
+      "kind": "OBSERVED",
+      "source_file_sha256": "75431e9deb2a769f7041167a577ff6b746110effd190abf50f6a3a7ade8481cc",
+      "decision_boundary": "Only runway identity and published length are observed. Display geometry, runway role, status, and capacity are modeled."
+    },
+    {
+      "id": "MODEL-GROUNDGRAPH-V1",
+      "label": "GroundGraph bounded operating assumptions",
+      "url": "docs/data-provenance.md",
+      "kind": "MODELED",
+      "decision_boundary": "Synthetic assumptions for a bounded demonstration; never live airport state or measured impact."
+    }
+  ]
+}

@@ -392,14 +392,16 @@ def test_latest_turnaround_event_keeps_manual_replay_context_stable(
     assert plan["episode_id"].startswith("EPISODE-8-")
     assert plan["memory_influence"]["context_event_class"] == "TURNAROUND"
     assert plan["strategy"] == "TURNAROUND_RECOVERY"
-    assert plan["model_candidate_set"] == [
-        {
-            "id": plan["candidate_id"],
-            "strategy": "TURNAROUND_RECOVERY",
-            "cost_score": plan["cost_score"],
-            "context_penalty": 0,
-        }
-    ]
+    assert len(plan["model_candidate_set"]) == 3
+    assert {item["id"] for item in plan["model_candidate_set"]} == {
+        item["id"] for item in plan["safe_candidate_set"]
+    }
+    assert plan["model_candidate_set"][0] == {
+        "id": plan["candidate_id"],
+        "strategy": "TURNAROUND_RECOVERY",
+        "cost_score": plan["cost_score"],
+        "context_penalty": 0,
+    }
 
 
 def test_reset_keeps_graph_memory_and_mcp_tools_are_bounded(

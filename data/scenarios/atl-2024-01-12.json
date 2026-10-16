@@ -1,0 +1,682 @@
+{
+  "scenario": {
+    "id": "ATL-2024-01-12-THUNDERSTORM-PM",
+    "name": "Atlanta thunderstorm operations recovery",
+    "airport": "ATL",
+    "airport_name": "Hartsfield-Jackson Atlanta International Airport",
+    "timezone": "America/New_York",
+    "date": "2024-01-12",
+    "start_at": "2024-01-12T14:00:00-05:00",
+    "end_at": "2024-01-12T18:00:00-05:00",
+    "initial_clock": "14:00",
+    "duration_minutes": 240,
+    "planning_interval_minutes": 5,
+    "planning_horizon_minutes": 90,
+    "execution_freeze_minutes": 10,
+    "description": "A bounded afternoon replay with exact public schedule, weather, and runway fields plus clearly labeled modeled operating assumptions."
+  },
+  "display": {
+    "accent": "amber",
+    "hazard_label": "THUNDERSTORM + LOW CEILING",
+    "map_variant": "five-parallel-runways",
+    "runway_orientation_degrees": 90,
+    "runway_order": [
+      "RWY-08L-26R",
+      "RWY-09L-27R",
+      "RWY-10-28"
+    ],
+    "gate_order": [
+      "B18",
+      "B20",
+      "B22",
+      "B24"
+    ]
+  },
+  "resources": {
+    "runways": [
+      {
+        "id": "RWY-08L-26R",
+        "label": "08L / 26R",
+        "length_ft": 9000,
+        "role": "ARRIVAL",
+        "capacity_per_hour": 26,
+        "status": "LIMITED",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KATL:08L/26R",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
+      },
+      {
+        "id": "RWY-09L-27R",
+        "label": "09L / 27R",
+        "length_ft": 12390,
+        "role": "DEPARTURE",
+        "capacity_per_hour": 32,
+        "status": "OPEN",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KATL:09L/27R",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
+      },
+      {
+        "id": "RWY-10-28",
+        "label": "10 / 28",
+        "length_ft": 9000,
+        "role": "MIXED",
+        "capacity_per_hour": 20,
+        "status": "STANDBY",
+        "source_id": "FAA-NASR-2023-12-28",
+        "source_record_id": "KATL:10/28",
+        "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MIXED",
+        "observed_fields": [
+          "id",
+          "label",
+          "length_ft"
+        ],
+        "modeled_fields": [
+          "role",
+          "capacity_per_hour",
+          "status"
+        ]
+      }
+    ],
+    "gates": [
+      {
+        "id": "B18",
+        "terminal": "Domestic-B",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "B20",
+        "terminal": "Domestic-B",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "B22",
+        "terminal": "Domestic-B",
+        "status": "OCCUPIED",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      },
+      {
+        "id": "B24",
+        "terminal": "Domestic-B",
+        "status": "AVAILABLE",
+        "compatible_classes": [
+          "NARROWBODY"
+        ],
+        "source_id": "MODEL-GROUNDGRAPH-V1",
+        "source_kind": "MODELED",
+        "observed_fields": [],
+        "modeled_fields": [
+          "id",
+          "terminal",
+          "status",
+          "compatible_classes"
+        ]
+      }
+    ]
+  },
+  "flights": [
+    {
+      "id": "DL2976-IN",
+      "callsign": "DL2976",
+      "kind": "INBOUND",
+      "origin": "AUS",
+      "destination": "ATL",
+      "scheduled_minute": 1,
+      "gate": "B18",
+      "runway": "RWY-08L-26R",
+      "status": "APPROACH",
+      "rotation_id": "ROT-DL2976-DL996",
+      "turn_minutes": 45,
+      "bag_risk": "LOW",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:DL2976:AUS:ATL",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "DL996-OUT",
+      "callsign": "DL996",
+      "kind": "OUTBOUND",
+      "origin": "ATL",
+      "destination": "LAX",
+      "scheduled_minute": 75,
+      "gate": "B18",
+      "runway": "RWY-09L-27R",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-DL2976-DL996",
+      "turn_minutes": 45,
+      "bag_risk": "LOW",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:DL996:ATL:LAX",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "DL2529-IN",
+      "callsign": "DL2529",
+      "kind": "INBOUND",
+      "origin": "SAN",
+      "destination": "ATL",
+      "scheduled_minute": 45,
+      "gate": "B20",
+      "runway": "RWY-08L-26R",
+      "status": "APPROACH",
+      "rotation_id": "ROT-DL2529-DL2842",
+      "turn_minutes": 45,
+      "bag_risk": "MEDIUM",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:DL2529:SAN:ATL",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "DL2842-OUT",
+      "callsign": "DL2842",
+      "kind": "OUTBOUND",
+      "origin": "ATL",
+      "destination": "PHL",
+      "scheduled_minute": 116,
+      "gate": "B20",
+      "runway": "RWY-09L-27R",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-DL2529-DL2842",
+      "turn_minutes": 45,
+      "bag_risk": "HIGH",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:DL2842:ATL:PHL",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "DL2512-IN",
+      "callsign": "DL2512",
+      "kind": "INBOUND",
+      "origin": "SFO",
+      "destination": "ATL",
+      "scheduled_minute": 92,
+      "gate": "B22",
+      "runway": "RWY-08L-26R",
+      "status": "APPROACH",
+      "rotation_id": "ROT-DL2512-DL1124",
+      "turn_minutes": 45,
+      "bag_risk": "HIGH",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:DL2512:SFO:ATL",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    },
+    {
+      "id": "DL1124-OUT",
+      "callsign": "DL1124",
+      "kind": "OUTBOUND",
+      "origin": "ATL",
+      "destination": "RSW",
+      "scheduled_minute": 193,
+      "gate": "B22",
+      "runway": "RWY-09L-27R",
+      "status": "TURNAROUND",
+      "rotation_id": "ROT-DL2512-DL1124",
+      "turn_minutes": 45,
+      "bag_risk": "MEDIUM",
+      "source_id": "BTS-2024-01",
+      "source_record_id": "2024-01-12:DL1124:ATL:RSW",
+      "modeled_source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MIXED",
+      "observed_fields": [
+        "callsign",
+        "kind",
+        "origin",
+        "destination",
+        "scheduled_minute"
+      ],
+      "modeled_fields": [
+        "id",
+        "gate",
+        "runway",
+        "status",
+        "rotation_id",
+        "turn_minutes",
+        "bag_risk"
+      ]
+    }
+  ],
+  "turnarounds": [
+    {
+      "id": "TURN-ROT-DL2976-DL996",
+      "rotation_id": "ROT-DL2976-DL996",
+      "inbound_flight_id": "DL2976-IN",
+      "outbound_flight_id": "DL996-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "TURN-ROT-DL2529-DL2842",
+      "rotation_id": "ROT-DL2529-DL2842",
+      "inbound_flight_id": "DL2529-IN",
+      "outbound_flight_id": "DL2842-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "TURN-ROT-DL2512-DL1124",
+      "rotation_id": "ROT-DL2512-DL1124",
+      "inbound_flight_id": "DL2512-IN",
+      "outbound_flight_id": "DL1124-OUT",
+      "baseline_critical_path_minutes": 45,
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_kind": "MODELED"
+    }
+  ],
+  "turnaround_task_template": [
+    {
+      "key": "DEPLANE",
+      "label": "Deplane and unload",
+      "duration_minutes": 8
+    },
+    {
+      "key": "CABIN_SERVICE",
+      "label": "Cabin service",
+      "duration_minutes": 12
+    },
+    {
+      "key": "BAG_RECONCILIATION",
+      "label": "Baggage reconciliation",
+      "duration_minutes": 25
+    },
+    {
+      "key": "BOARD_CLOSE",
+      "label": "Board and close",
+      "duration_minutes": 12
+    }
+  ],
+  "events": [
+    {
+      "id": "EVT-ATL-WX-1400",
+      "at_minute": 0,
+      "type": "WEATHER",
+      "severity": "HIGH",
+      "flight_id": null,
+      "resource_id": "RWY-08L-26R",
+      "delay_minutes": 10,
+      "capacity_delta": -6,
+      "summary": "The 13:57 KATL SPECI reports 2 miles visibility, drizzle and mist with an overcast ceiling at 400 feet; the replay starts with a modeled arrival-capacity constraint.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KATL-2024",
+      "source_record_id": "KATL:2024-01-12T13:57:00-05:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "at_minute",
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    },
+    {
+      "id": "EVT-ATL-RAIN-1447",
+      "at_minute": 47,
+      "type": "WEATHER_UPDATE",
+      "severity": "HIGH",
+      "flight_id": null,
+      "resource_id": "RWY-08L-26R",
+      "delay_minutes": 16,
+      "capacity_delta": -8,
+      "summary": "The 14:47 KATL SPECI reports 1 mile visibility, heavy rain and mist, an overcast ceiling at 300 feet, cumulonimbus and lightning; the replay model deepens the arrival constraint.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KATL-2024",
+      "source_record_id": "KATL:2024-01-12T14:47:00-05:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    },
+    {
+      "id": "EVT-ATL-TSRA-1452",
+      "at_minute": 52,
+      "type": "WEATHER_UPDATE",
+      "severity": "CRITICAL",
+      "flight_id": null,
+      "resource_id": "RWY-08L-26R",
+      "delay_minutes": 20,
+      "capacity_delta": -10,
+      "summary": "The 14:52 KATL METAR reports heavy thunderstorm rain, 1.5 miles visibility, broken cloud at 300 feet and cumulonimbus; the replay model triggers an immediate recovery replan.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KATL-2024",
+      "source_record_id": "KATL:2024-01-12T14:52:00-05:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    },
+    {
+      "id": "EVT-ATL-BAG-1510",
+      "at_minute": 70,
+      "type": "BAG_RECONCILIATION_DELAY",
+      "severity": "HIGH",
+      "flight_id": "DL2529-IN",
+      "resource_id": "B20",
+      "delay_minutes": 12,
+      "capacity_delta": 0,
+      "summary": "A modeled baggage scan mismatch extends the DL2529 to DL2842 turnaround from 45 to 57 minutes.",
+      "source_kind": "MODELED",
+      "source_id": "MODEL-GROUNDGRAPH-V1",
+      "source_record_id": "MODELED:BAG_SCAN_MISMATCH:0070",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [],
+      "modeled_fields": [
+        "at_minute",
+        "type",
+        "severity",
+        "flight_id",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary",
+        "source_id"
+      ]
+    },
+    {
+      "id": "EVT-ATL-WX-1517",
+      "at_minute": 77,
+      "type": "WEATHER_UPDATE",
+      "severity": "MEDIUM",
+      "flight_id": null,
+      "resource_id": "RWY-08L-26R",
+      "delay_minutes": 6,
+      "capacity_delta": 7,
+      "summary": "The 15:17 KATL SPECI reports the thunderstorm ended at 15:16, with light rain, mist and a 400-foot overcast ceiling; the replay model restores part of the constrained capacity.",
+      "source_kind": "MIXED",
+      "source_id": "NOAA-KATL-2024",
+      "source_record_id": "KATL:2024-01-12T15:17:00-05:00",
+      "effect_source_kind": "MODELED",
+      "observed_fields": [
+        "at_minute",
+        "type",
+        "source_id"
+      ],
+      "modeled_fields": [
+        "severity",
+        "resource_id",
+        "delay_minutes",
+        "capacity_delta",
+        "summary"
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "id": "ATL-PROC-GATE-1.2",
+      "title": "Gate reassignment during constrained operations",
+      "version": "1.2",
+      "status": "SUPERSEDED",
+      "current": false,
+      "effective_at": "2023-11-01",
+      "owner": "Ramp Control",
+      "source": "Synthetic ATL operations handbook §4.2",
+      "action_types": [
+        "REASSIGN_GATE"
+      ],
+      "rule": "An available compatible gate may be assigned after conflict and tow checks.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "ATL-PROC-GATE-1.3",
+      "title": "Gate reassignment during constrained operations",
+      "version": "1.3",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Ramp Control",
+      "source": "Synthetic ATL operations handbook §4.2",
+      "action_types": [
+        "REASSIGN_GATE"
+      ],
+      "rule": "An available compatible gate may be assigned when the occupancy window is clear and the operation remains inside the planning horizon.",
+      "supersedes": "ATL-PROC-GATE-1.2",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "ATL-PROC-SLOT-2.1",
+      "title": "Departure capacity prioritization",
+      "version": "2.1",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Flow Management",
+      "source": "Synthetic ATL operations handbook §6.1",
+      "action_types": [
+        "RESERVE_SLOT",
+        "RESEQUENCE_DEPARTURE"
+      ],
+      "rule": "A protected departure slot must be unique, open, and linked to the active capacity resource.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "ATL-PROC-TURN-3.0",
+      "title": "Turnaround recovery and rotation protection",
+      "version": "3.0",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Turnaround Control",
+      "source": "Synthetic ATL operations handbook §7.4",
+      "action_types": [
+        "RESEQUENCE_TASKS",
+        "PROTECT_ROTATION"
+      ],
+      "rule": "Independent tasks may run concurrently, while all dependency edges and minimum task durations remain binding.",
+      "source_kind": "MODELED"
+    },
+    {
+      "id": "ATL-PROC-AUTO-1.0",
+      "title": "Bounded automatic recovery",
+      "version": "1.0",
+      "status": "CURRENT",
+      "current": true,
+      "effective_at": "2024-01-01",
+      "owner": "Airport Operations Center",
+      "source": "Synthetic ATL replay bulletin 2024-01-01",
+      "action_types": [
+        "APPLY_VALIDATED_PLAN"
+      ],
+      "rule": "The system may automatically apply a validated plan only within modeled replay scope, with current graph state and a complete audit trail.",
+      "source_kind": "MODELED"
+    }
+  ],
+  "provenance": [
+    {
+      "id": "BTS-2024-01",
+      "label": "BTS On-Time Performance, January 2024",
+      "url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2024_1.zip",
+      "kind": "OBSERVED_POST_EVENT_ARCHIVE",
+      "source_file_sha256": "fe089b45523f9d4ac0ccd0e176a543d274e914ee5ae5bd384dbaafc7dc06ebfd",
+      "decision_boundary": "Only flight identity, route, direction, and scheduled local movement time enter the replay. Actual delays, cancellations, diversions, and arrival/departure outcomes are excluded."
+    },
+    {
+      "id": "NOAA-KATL-2024",
+      "label": "NOAA Global Hourly KATL observations, 2024",
+      "url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2024/72219013874.csv",
+      "kind": "OBSERVED",
+      "source_file_sha256": "cc2d1ce4b1209a7d8718173828cbd30781070d2efe01f332e76af02b6090f7ae",
+      "decision_boundary": "Each observation becomes eligible only at its replay time. Every capacity and delay effect remains a GroundGraph modeled assumption."
+    },
+    {
+      "id": "FAA-NASR-2023-12-28",
+      "label": "FAA NASR airport and runway records",
+      "url": "https://nfdc.faa.gov/webContent/28DaySub/extra/28_Dec_2023_APT_CSV.zip",
+      "kind": "OBSERVED",
+      "source_file_sha256": "75431e9deb2a769f7041167a577ff6b746110effd190abf50f6a3a7ade8481cc",
+      "decision_boundary": "Only runway identity and published length are observed. Display geometry, runway role, status, and capacity are modeled."
+    },
+    {
+      "id": "MODEL-GROUNDGRAPH-V1",
+      "label": "GroundGraph bounded operating assumptions",
+      "url": "docs/data-provenance.md",
+      "kind": "MODELED",
+      "decision_boundary": "Synthetic assumptions for a bounded demonstration; never live airport state or measured impact."
+    }
+  ]
+}

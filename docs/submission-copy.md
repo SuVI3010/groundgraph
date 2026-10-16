@@ -16,19 +16,21 @@ Continuous airport recovery powered by communicating agents and a shared FalkorD
 
 ## Short description
 
-GroundGraph runs modeled disruptions inside a public-data O'Hare replay, coordinates six concurrent Cypher specialists through FalkorDB, lets local Qwen select from a context-bounded shortlist of graph-derived recovery plans, applies bounded state changes under synthetic policy, and recalls modeled outcomes only for matching disruption contexts.
+GroundGraph runs modeled disruptions inside separate ORD, ATL, and SFO historical-demand replays, coordinates six concurrent Cypher specialists through FalkorDB, lets local Qwen compare only server-approved recovery plans, explains each decision from trigger to projected outcome, and recalls modeled results only for matching disruption contexts.
 
 ## Full description
 
 Airport disruption recovery is a connected-data problem: weather changes runway capacity, ground tasks delay rotations, gates constrain arrivals, and one choice can affect later flights. The information is usually split between operational state, team handoffs, policy documents, and previous decisions.
 
-GroundGraph puts those relationships in FalkorDB and turns them into one transparent recovery loop. A bounded four-hour O'Hare replay continuously updates the graph. Six specialists execute separate weather, flow, gate, turnaround, policy, and memory Cypher reads concurrently against one input version. They persist query names, timestamps, evidence IDs, findings, and handoffs before the coordinator begins.
+GroundGraph puts those relationships in FalkorDB and turns them into one transparent recovery loop. The airport selector switches among three independent four-hour, six-flight graphs: an ORD winter morning, an ATL thunderstorm afternoon, and an SFO wind-and-rain afternoon. Six specialists execute separate weather, flow, gate, turnaround, policy, and memory Cypher reads concurrently against one input version. They persist query names, timestamps, evidence IDs, findings, and handoffs before the coordinator begins.
 
-The planner builds three materially different two-action strategies. Their projected recovery minutes and operational burden come from connected runway, gate, turnaround, and delay state; lower `cost_score` is better. After ineligible and strictly dominated choices are removed, the full ranking is stored as `safe_candidate_set`. A context-bounded `model_candidate_set` keeps candidates within 4 cost points of its leader for a `TURNAROUND` event class or within 8 points for other event classes. Those same IDs become `ModelRun.allowlisted_candidate_ids`, and local Qwen may select only one supplied shortlist ID. Every application rechecks graph version, required graph relationships, current policy, knowledge freshness, execution freeze, minimum benefit, and churn. Each applied outcome becomes context-rich episodic memory that survives replay reset and application restart with its full decision lineage and the same six unique `AgentRun → Finding → Handoff` chains consumed by its `DecisionEpisode`, then adjusts later rankings only when event class and connected entities match.
+The planner builds three materially different two-action strategies. Their projected recovery minutes and operational burden come from connected runway, gate, turnaround, and delay state; lower `cost_score` is better. After ineligible and strictly dominated choices are removed, the full ranking is stored as `safe_candidate_set`. A context-bounded `model_candidate_set` keeps safe candidates within 18 cost points of its leader for a `TURNAROUND` event class or within 8 points for other event classes. Those same IDs become `ModelRun.allowlisted_candidate_ids`, and local Qwen may select only one supplied shortlist ID. Every application rechecks seven conditions: current graph version, current policy authority, current replay knowledge, required targets and graph relationships, execution freeze, minimum projected benefit, and churn. Each applied outcome becomes context-rich episodic memory that survives replay reset and application restart with its full decision lineage and the same six unique `AgentRun → Finding → Handoff` chains consumed by its `DecisionEpisode`, then adjusts later rankings only when event class and connected entities match.
+
+The episode-scoped Decision Story makes the loop understandable without reading a graph console. It shows what changed, which connected departure is at risk and why now, what each specialist found, which safe alternatives Qwen compared, why one was selected, whether all seven guards passed, what projected result was written, and when the graph will scan again. Selecting an older decision resolves all of those stages from the same `DecisionEpisode`.
 
 The Operations Brain interface routes plain-language questions to ownership, incident, current-policy, or supersession traversals. It returns graph paths, evidence IDs, and source citations, or says when the bounded graph has insufficient evidence. Updating a policy changes graph state and triggers replanning without changing application code.
 
-The interface presents a top-down airport replay, live agent status, all six handoffs for a selected cycle, the causal impact path, policy evidence, Operations Brain answers, continuous replanning history, and projected counterfactual outcomes. The causal path contains only relationships already persisted in FalkorDB. Public BTS schedule fields, time-gated NOAA observations, and FAA runway facts are separated from modeled gates, operating events, policy, and recovery effects. Record-level `SOURCED_FROM` and `MODELED_BY` links expose stable row IDs and field boundaries, while the exact selected public rows are checked into the repository with pinned hashes and a reproducible extractor.
+The interface presents a top-down airport replay, the linear Decision Story, the causal impact path, policy evidence, Operations Brain answers, continuous replanning history, and projected counterfactual outcomes. The causal path contains only relationships already persisted in FalkorDB. Public BTS schedule fields, time-gated NOAA observations, and FAA runway facts are separated from modeled gates, operating events, policy, and recovery effects. Record-level `SOURCED_FROM` and `MODELED_BY` links expose stable row IDs and field boundaries. The default ORD scenario includes its exact selected public rows with pinned hashes and a reproducible extractor. ATL and SFO include source URLs, source-file digests, record keys, and field-level boundaries in their scenario packs; selected raw extracts for those two airports are not checked into the ORD evidence pack.
 
 GroundGraph is a research replay. It does not control aircraft or airport systems, and every result is described as projected under the replay assumptions.
 
@@ -38,8 +40,10 @@ FalkorDB is the primary application state, not a visualization added after plann
 
 ## Technical highlights
 
-- Full official FalkorDB server running locally through Podman as the judged runtime.
+- Full official FalkorDB server running locally through Podman as the judged runtime; a newly created macOS Podman machine uses AppleHV.
 - Flask and a dependency-free browser interface.
+- Separate ORD, ATL, and SFO scenario graphs selected through one general recovery interface.
+- Episode-scoped Decision Story joining trigger, why-now timing, six findings, candidate comparison, model choice, seven guards, outcome, and next checkpoint.
 - Local `qwen3:4b-instruct` through Ollama, selecting only from the context-bounded `model_candidate_set`, with a labeled deterministic fallback.
 - Six allowlisted stdio MCP tools: disruption inspection, handoff retrieval, coordinator-trace retrieval, recall, policy lookup, and candidate validation.
 - Six real concurrent specialist Cypher reads with query names, overlap timestamps, evidence IDs, versions, and consumed handoffs.
@@ -49,7 +53,7 @@ FalkorDB is the primary application state, not a visualization added after plann
 - Five-minute and event-driven replanning with churn and stale-state guards.
 - Policy-authorized bounded autopilot and supervised mode controlled by the server-side autonomy endpoint.
 - Question-routed Operations Brain answers for ownership, incidents, current policy, and supersession history.
-- Minimal BTS, NOAA, and FAA source extracts with pinned hashes, a reproducible extractor, an explicit provenance manifest, and record-level graph links.
+- Minimal ORD BTS, NOAA, and FAA source extracts with pinned hashes and a reproducible extractor; ATL/SFO scenario packs retain source identifiers and explicit observed/modeled boundaries.
 - Versioned synthetic operations knowledge pack with sources and ownership.
 
 ## Links to add before submission

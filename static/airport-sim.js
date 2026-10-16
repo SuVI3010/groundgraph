@@ -10,19 +10,33 @@
     ink: "#ecf8fa",
   });
 
-  const RUNWAYS = [
-    { y: 0.13, label: "09L · 27R" },
-    { y: 0.25, label: "09C · 27C" },
-    { y: 0.37, label: "09R · 27L" },
-    { y: 0.50, label: "10L · 28R" },
-    { y: 0.62, label: "10C · 28C" },
-    { y: 0.74, label: "10R · 28L" },
+  const AIRPORT_PROFILES = Object.freeze({
+    ORD: {
+      shortName: "O’Hare", terminal: "O’HARE TERMINAL COMPLEX", weather: "snow",
+      runwayYs: [0.18, 0.43, 0.68], gateXs: [0.29, 0.42, 0.57, 0.71],
+      accent: "#45d8ff",
+    },
+    ATL: {
+      shortName: "Atlanta", terminal: "ATL MIDFIELD CONCOURSES", weather: "storm",
+      runwayYs: [0.18, 0.43, 0.68], gateXs: [0.27, 0.40, 0.58, 0.72],
+      accent: "#ffc45e",
+    },
+    SFO: {
+      shortName: "San Francisco", terminal: "SFO TERMINAL COMPLEX", weather: "rain",
+      runwayYs: [0.20, 0.45, 0.70], gateXs: [0.28, 0.41, 0.59, 0.73],
+      accent: "#8bdff3",
+    },
+  });
+
+  const FALLBACK_RUNWAYS = [
+    { id: "RWY-1", y: 0.18, label: "RUNWAY 1" },
+    { id: "RWY-2", y: 0.43, label: "RUNWAY 2" },
+    { id: "RWY-3", y: 0.68, label: "RUNWAY 3" },
   ];
 
-  const GATES = [
-    { id: "B8", x: 0.30, y: 0.88 }, { id: "B10", x: 0.38, y: 0.88 },
-    { id: "C16", x: 0.48, y: 0.86 }, { id: "C18", x: 0.57, y: 0.86 },
-    { id: "G4", x: 0.69, y: 0.88 }, { id: "H12", x: 0.78, y: 0.88 },
+  const FALLBACK_GATES = [
+    { id: "G1", x: 0.29, y: 0.88 }, { id: "G2", x: 0.42, y: 0.86 },
+    { id: "G3", x: 0.57, y: 0.86 }, { id: "G4", x: 0.71, y: 0.88 },
   ];
 
   const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
@@ -61,9 +75,9 @@
     return { ...points.at(-1), angle: 0 };
   }
 
-  function gateFor(flight, index) {
+  function gateFor(flight, index, gates) {
     const requested = String(flight.gate || "").toUpperCase();
-    return GATES.find((gate) => gate.id === requested) || GATES[index % GATES.length];
+    return gates.find((gate) => gate.id === requested) || gates[index % gates.length];
   }
 
   class AirportSurface {
@@ -72,6 +86,10 @@
       if (!this.canvas) throw new Error("Airport canvas was not found");
       this.context = this.canvas.getContext("2d", { alpha: false });
       this.snapshot = null;
+      this.airportCode = "ORD";
+      this.profile = AIRPORT_PROFILES.ORD;
+      this.runways = FALLBACK_RUNWAYS;
+      this.gates = FALLBACK_GATES;
       this.engineAvailable = false;
       this.time = 0;
       this.planApplied = false;
@@ -94,6 +112,21 @@
 
     setSnapshot(snapshot) {
       this.snapshot = snapshot || null;
+      this.airportCode = String(snapshot?.scenario?.airport || "ORD").toUpperCase();
+      this.profile = AIRPORT_PROFILES[this.airportCode] || AIRPORT_PROFILES.ORD;
+      const resources = Array.isArray(snapshot?.resources) ? snapshot.resources : [];
+      const runwayResources = resources.filter((item) => String(item?.type).toUpperCase() === "RUNWAY");
+      const gateResources = resources.filter((item) => String(item?.type).toUpperCase() === "GATE");
+      this.runways = runwayResources.length ? runwayResources.map((item, index) => ({
+        ...item,
+        y: this.profile.runwayYs[index] ?? (0.18 + index * (0.5 / Math.max(1, runwayResources.length - 1))),
+        label: String(item.label || item.id || `RUNWAY ${index + 1}`).replace(" / ", " · "),
+      })) : FALLBACK_RUNWAYS;
+      this.gates = gateResources.length ? gateResources.map((item, index) => ({
+        ...item,
+        x: this.profile.gateXs[index] ?? (0.28 + index * (0.45 / Math.max(1, gateResources.length - 1))),
+        y: index === 0 || index === gateResources.length - 1 ? 0.88 : 0.86,
+      })) : FALLBACK_GATES;
       const plan = snapshot?.current_plan;
       const historical = Boolean(plan?.display_only || plan?.historical || plan?.is_current === false);
       this.planApplied = !historical && ["APPLIED", "EXECUTING", "COMPLETED"].includes(String(plan?.status || "").toUpperCase());
@@ -138,8 +171,10 @@
         const operation = String(flight.kind || flight.direction || flight.operation || "departure").toLowerCase();
         const kind = operation.includes("arr") || operation.includes("inbound") || operation === "in" ? "arrival" : "departure";
         const minute = Number(flight.minute ?? flight.scheduled_minute ?? flight.event_minute ?? 0);
-        const gate = gateFor(flight, index);
-        const runway = RUNWAYS[index % RUNWAYS.length];
+        const gate = gateFor(flight, index, this.gates);
+        const requestedRunway = String(flight.runway || "").toUpperCase();
+        const runway = this.runways.find((item) => String(item.id).toUpperCase() === requestedRunway)
+          || this.runways[index % this.runways.length];
         const risk = Boolean(flight.at_risk || flight.risk || ["DELAYED", "AT_RISK", "CONFLICT"].includes(String(flight.status || "").toUpperCase()));
         const protectedFlight = Boolean(flight.protected || this.planApplied && (
           flight.plan_target || risk || planTargets.has(flight.id) || planFlightPath.has(flight.id)
@@ -197,7 +232,7 @@
       if (operational) this.drawCapacity(context, width, height, timestamp);
       const aircraft = this.aircraftStates();
       aircraft.forEach((item) => this.drawFlight(context, width, height, item));
-      if (operational) { this.drawVehicles(context, width, height, timestamp); this.drawSnow(context, width, height, timestamp); }
+      if (operational) { this.drawVehicles(context, width, height, timestamp); this.drawWeather(context, width, height, timestamp); }
       const counts = {
         airborne: aircraft.filter((item) => ["airborne", "landing", "takeoff"].includes(item.phase)).length,
         taxiing: aircraft.filter((item) => item.phase === "taxi").length,
@@ -209,7 +244,7 @@
       if (signature !== this.countSignature) {
         this.countSignature = signature; this.onCounts(counts);
         this.canvas.setAttribute("aria-label", operational
-          ? `Stylized O'Hare operations replay. ${counts.airborne} airborne, ${counts.taxiing} taxiing, ${counts.atGate} at a gate, ${counts.risk} at risk and ${counts.protected} protected by the current replay plan.`
+          ? `Stylized ${this.profile.shortName} operations replay. ${counts.airborne} airborne, ${counts.taxiing} taxiing, ${counts.atGate} at a gate, ${counts.risk} at risk and ${counts.protected} protected by the selected replay decision.`
           : this.snapshot?.ok === true ? "Airport replay paused on the last genuine server snapshot." : "Airport replay paused. FalkorDB-backed engine state is required to animate operations.");
       }
     }
@@ -228,7 +263,7 @@
 
     drawRunways(context, width, height) {
       const unit = Math.max(1, width / 1100);
-      RUNWAYS.forEach((runway, index) => {
+      this.runways.forEach((runway, index) => {
         const y = runway.y * height; const h = Math.max(16 * unit, height * 0.044);
         context.fillStyle = index % 2 ? "rgba(37,55,64,.96)" : "rgba(41,60,69,.96)";
         roundRect(context, width * 0.035, y - h / 2, width * 0.93, h, h * 0.12); context.fill();
@@ -248,7 +283,7 @@
       const unit = Math.max(1, width / 1100);
       const paths = [
         [[0.18, 0.79], [0.83, 0.79]], [[0.25, 0.13], [0.25, 0.79]], [[0.76, 0.13], [0.76, 0.79]],
-        ...GATES.map((gate) => [[gate.x, 0.79], [gate.x, gate.y]]),
+        ...this.gates.map((gate) => [[gate.x, 0.79], [gate.x, gate.y]]),
       ];
       context.lineCap = "round"; context.lineJoin = "round";
       paths.forEach((points) => {
@@ -275,8 +310,8 @@
       context.fillStyle = "rgba(253,213,95,.86)";
       for (let x = 0.22; x < 0.79; x += 0.024) { roundRect(context, x * width, height * 0.895, width * 0.012, height * 0.018, 2 * unit); context.fill(); }
       context.fillStyle = "rgba(13,39,47,.68)"; context.font = `850 ${Math.max(7, width * 0.006)}px Inter,system-ui`; context.textAlign = "left"; context.textBaseline = "middle";
-      context.fillText("O’HARE TERMINAL COMPLEX", width * 0.215, height * 0.858);
-      GATES.forEach((gate) => {
+      context.fillText(this.profile.terminal, width * 0.215, height * 0.858);
+      this.gates.forEach((gate) => {
         context.strokeStyle = "rgba(247,252,252,.42)"; context.lineWidth = unit; context.setLineDash([4 * unit, 4 * unit]);
         context.beginPath(); context.arc(gate.x * width, gate.y * height, width * 0.024, Math.PI * 1.08, Math.PI * 1.92); context.stroke(); context.setLineDash([]);
         context.fillStyle = "rgba(13,36,43,.85)"; roundRect(context, gate.x * width - 13 * unit, gate.y * height + 9 * unit, 26 * unit, 12 * unit, 4 * unit); context.fill();
@@ -287,12 +322,16 @@
     drawCapacity(context, width, height, timestamp) {
       const cycleStatus = String(this.snapshot?.replanning?.status || "").toUpperCase();
       const running = cycleStatus.includes("RUN") || cycleStatus.includes("ANALYZ");
+      const activeEvent = (Array.isArray(this.snapshot?.events) ? this.snapshot.events : [])
+        .find((event) => String(event?.status).toUpperCase() === "ACTIVE");
+      if (!running && !activeEvent) return;
       const pulse = 0.45 + Math.sin(timestamp / 420) * 0.16;
       context.save(); context.globalAlpha = running ? pulse : 0.32;
       context.fillStyle = running ? "rgba(69,216,255,.25)" : "rgba(255,196,94,.18)";
       roundRect(context, width * 0.405, height * 0.335, width * 0.19, height * 0.07, height * 0.012); context.fill();
       context.fillStyle = running ? "#b6effc" : "#f7d594"; context.font = `800 ${Math.max(6, width * 0.0052)}px Inter,system-ui`; context.textAlign = "center"; context.textBaseline = "middle";
-      context.fillText(running ? "GRAPH REPLAN IN PROGRESS" : "REDUCED FLOW CAPACITY", width * 0.5, height * 0.37); context.restore();
+      const eventLabel = String(activeEvent?.type || "ACTIVE OPERATIONAL CHANGE").replaceAll("_", " ");
+      context.fillText(running ? "GRAPH REPLAN IN PROGRESS" : eventLabel, width * 0.5, height * 0.37); context.restore();
     }
 
     drawFlight(context, width, height, item) {
@@ -325,12 +364,28 @@
       });
     }
 
-    drawSnow(context, width, height, timestamp) {
-      context.fillStyle = "rgba(229,247,250,.42)";
-      this.snow.forEach((flake, index) => {
-        const y = (flake.y + timestamp * flake.speed) % 1; const x = (flake.x + Math.sin(timestamp / 1100 + index) * 0.008 + 1) % 1;
-        context.beginPath(); context.arc(x * width, y * height, flake.r * Math.max(0.65, width / 1200), 0, Math.PI * 2); context.fill();
+    drawWeather(context, width, height, timestamp) {
+      if (this.profile.weather === "snow") {
+        context.fillStyle = "rgba(229,247,250,.42)";
+        this.snow.forEach((flake, index) => {
+          const y = (flake.y + timestamp * flake.speed) % 1; const x = (flake.x + Math.sin(timestamp / 1100 + index) * 0.008 + 1) % 1;
+          context.beginPath(); context.arc(x * width, y * height, flake.r * Math.max(0.65, width / 1200), 0, Math.PI * 2); context.fill();
+        });
+        return;
+      }
+      context.save();
+      context.strokeStyle = this.profile.weather === "storm" ? "rgba(199,226,238,.25)" : "rgba(189,229,243,.20)";
+      context.lineWidth = Math.max(0.65, width / 1800);
+      this.snow.forEach((drop, index) => {
+        const y = (drop.y + timestamp * (drop.speed * 3.2)) % 1;
+        const x = (drop.x + timestamp * 0.000006 + index * 0.0003) % 1;
+        context.beginPath(); context.moveTo(x * width, y * height); context.lineTo(x * width - width * 0.008, y * height + height * 0.035); context.stroke();
       });
+      if (this.profile.weather === "storm") {
+        const flash = Math.max(0, Math.sin(timestamp / 940) - 0.985) * 3.5;
+        context.fillStyle = `rgba(255,231,170,${flash})`; context.fillRect(0, 0, width, height);
+      }
+      context.restore();
     }
   }
 

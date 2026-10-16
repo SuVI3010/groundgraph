@@ -1,23 +1,179 @@
-"""Flask API for the GroundGraph bounded O'Hare replay."""
+"""Flask API for GroundGraph's bounded airport replay scenarios."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
 import threading
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from decision_story import build_decision_story
 from engine import GraphNotReadyError, GroundGraphEngine
 
 
-def create_app(engine: GroundGraphEngine | None = None) -> Flask:
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_REGISTRY_PATH = BASE_DIR / "data" / "scenario-registry.json"
+
+
+def load_scenario_registry(path: Path | str | None = None) -> dict[str, Any]:
+    """Load and validate the allowlisted local replay catalog.
+
+    The registry may select only checked-in files under this repository. Graph
+    names are validated before they can reach FalkorDB. This keeps scenario
+    switching a bounded product feature instead of an arbitrary file/graph API.
+    """
+
+    source = Path(path or DEFAULT_REGISTRY_PATH).resolve()
+    if not source.is_file():
+        default_path = (BASE_DIR / "data" / "scenario.json").resolve()
+        return {
+            "default_scenario_id": "ORD-2024-01-12-WINTER-AM",
+            "scenarios": [
+                {
+                    "id": "ORD-2024-01-12-WINTER-AM",
+                    "airport": "ORD",
+                    "airport_name": "Chicago O'Hare International Airport",
+                    "label": "ORD · Snow + rotation recovery",
+                    "data_path": "data/scenario.json",
+                    "resolved_data_path": str(default_path),
+                    "graph_name": "groundgraph",
+                    "sha256": hashlib.sha256(default_path.read_bytes()).hexdigest(),
+                    "summary": "Bounded O'Hare winter-operations replay.",
+                }
+            ],
+        }
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("scenarios"), list):
+        raise ValueError("Scenario registry must contain a scenarios list")
+    entries: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_graphs: set[str] = set()
+    for raw in payload["scenarios"]:
+        if not isinstance(raw, dict):
+            raise ValueError("Each scenario registry entry must be an object")
+        entry = dict(raw)
+        scenario_id = str(entry.get("id", "")).strip()
+        graph_name = str(entry.get("graph_name", "")).strip()
+        relative_path = str(entry.get("data_path", "")).strip()
+        if not scenario_id or scenario_id in seen_ids:
+            raise ValueError(f"Scenario id is missing or duplicated: {scenario_id!r}")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", graph_name):
+            raise ValueError(f"Unsafe scenario graph name: {graph_name!r}")
+        if graph_name in seen_graphs:
+            raise ValueError(f"Scenario graph name is duplicated: {graph_name!r}")
+        data_path = (BASE_DIR / relative_path).resolve()
+        try:
+            data_path.relative_to(BASE_DIR)
+        except ValueError as exc:
+            raise ValueError(f"Scenario file escapes the repository: {relative_path!r}") from exc
+        if not data_path.is_file():
+            raise ValueError(f"Scenario file is missing: {relative_path!r}")
+        expected_sha = str(entry.get("sha256", "")).strip()
+        actual_sha = hashlib.sha256(data_path.read_bytes()).hexdigest()
+        if not expected_sha or actual_sha != expected_sha:
+            raise ValueError(
+                f"Scenario checksum mismatch for {relative_path!r}: "
+                f"expected {expected_sha or '<missing>'}, got {actual_sha}"
+            )
+        scenario_payload = json.loads(data_path.read_text(encoding="utf-8"))
+        scenario_metadata = dict(scenario_payload.get("scenario", {}))
+        packaged_id = str(scenario_metadata.get("id", ""))
+        if packaged_id != scenario_id:
+            raise ValueError(
+                f"Registry id {scenario_id!r} does not match packaged id {packaged_id!r}"
+            )
+        entry["id"] = scenario_id
+        entry["graph_name"] = graph_name
+        entry["data_path"] = relative_path
+        entry["resolved_data_path"] = str(data_path)
+        entry.setdefault("airport", scenario_metadata.get("airport"))
+        entry.setdefault("airport_name", scenario_metadata.get("airport_name"))
+        entry.setdefault("date", str(scenario_metadata.get("start_at", ""))[:10])
+        entry.setdefault("timezone", scenario_metadata.get("timezone"))
+        entries.append(entry)
+        seen_ids.add(scenario_id)
+        seen_graphs.add(graph_name)
+    default_id = str(payload.get("default_scenario_id", ""))
+    if default_id not in seen_ids:
+        raise ValueError("Scenario registry default_scenario_id is not registered")
+    return {"default_scenario_id": default_id, "scenarios": entries}
+
+
+def create_app(
+    engine: GroundGraphEngine | None = None,
+    *,
+    registry_path: Path | str | None = None,
+    scenario_engine_factory: Any | None = None,
+) -> Flask:
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["JSON_SORT_KEYS"] = False
-    holder: dict[str, GroundGraphEngine | None] = {"engine": engine}
-    init_lock = threading.Lock()
+    registry = load_scenario_registry(registry_path)
+    registry_by_id = {
+        str(item["id"]): dict(item) for item in registry["scenarios"]
+    }
+    default_scenario_id = str(registry["default_scenario_id"])
+    packaged_default_graph = str(
+        registry_by_id[default_scenario_id]["graph_name"]
+    )
+    configured_graph_base = os.getenv("FALKORDB_GRAPH", packaged_default_graph)
+    initial_id = (
+        str(engine.scenario_id)
+        if engine is not None
+        else str(registry["default_scenario_id"])
+    )
+    holder: dict[str, Any] = {
+        "engine": engine,
+        "engines": ({initial_id: engine} if engine is not None else {}),
+        "active_scenario_id": initial_id,
+        "registry": registry,
+    }
+    init_lock = threading.RLock()
+
+    def public_entry(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in entry.items()
+            if key not in {"resolved_data_path"}
+        }
+
+    def runtime_graph_name(scenario_id: str) -> str:
+        if scenario_id == default_scenario_id:
+            return configured_graph_base
+        entry = registry_by_id[scenario_id]
+        if configured_graph_base == packaged_default_graph:
+            return str(entry["graph_name"])
+        airport_suffix = re.sub(
+            r"[^A-Za-z0-9_]", "_", str(entry.get("airport", scenario_id)).lower()
+        )
+        return f"{configured_graph_base}_{airport_suffix}"
+
+    def build_engine(scenario_id: str) -> GroundGraphEngine:
+        entry = registry_by_id[scenario_id]
+        if scenario_engine_factory is not None:
+            return scenario_engine_factory(dict(entry))
+        mode = os.getenv("FALKORDB_MODE", "server").strip().lower()
+        graph_name = runtime_graph_name(scenario_id)
+        lite_path: Path | str | None = None
+        if mode == "lite":
+            if scenario_id == default_scenario_id:
+                lite_path = os.getenv(
+                    "FALKORDB_LITE_PATH", str(BASE_DIR / ".data" / "groundgraph.db")
+                )
+            else:
+                lite_path = BASE_DIR / ".data" / f"{graph_name}.db"
+        return GroundGraphEngine(
+            data_path=entry["resolved_data_path"],
+            mode=mode,
+            graph_name=graph_name,
+            lite_path=lite_path,
+        )
 
     def unavailable_payload(
         exc: Exception, *, code: str = "GRAPH_UNAVAILABLE"
@@ -41,11 +197,28 @@ def create_app(engine: GroundGraphEngine | None = None) -> Flask:
         }
 
     def get_engine() -> GroundGraphEngine:
-        if holder["engine"] is None:
+        active_id = str(holder["active_scenario_id"])
+        active = holder["engines"].get(active_id)
+        if active is None:
             with init_lock:
-                if holder["engine"] is None:
-                    holder["engine"] = GroundGraphEngine()
-        return holder["engine"]
+                active = holder["engines"].get(active_id)
+                if active is None:
+                    active = build_engine(active_id)
+                    holder["engines"][active_id] = active
+                holder["engine"] = active
+        return active
+
+    def activate_scenario(scenario_id: str) -> GroundGraphEngine:
+        with init_lock:
+            selected = holder["engines"].get(scenario_id)
+            if selected is None:
+                selected = build_engine(scenario_id)
+                if str(selected.scenario_id) != scenario_id:
+                    raise RuntimeError("Selected engine returned the wrong scenario")
+                holder["engines"][scenario_id] = selected
+            holder["active_scenario_id"] = scenario_id
+            holder["engine"] = selected
+            return selected
 
     @app.errorhandler(RedisConnectionError)
     @app.errorhandler(RedisTimeoutError)
@@ -70,6 +243,103 @@ def create_app(engine: GroundGraphEngine | None = None) -> Flask:
     @app.get("/api/snapshot")
     def snapshot():
         return jsonify(get_engine().snapshot())
+
+    @app.get("/api/decision-story")
+    def decision_story():
+        episode_id = str(request.args.get("episode_id", "")).strip() or None
+        try:
+            return jsonify(build_decision_story(get_engine(), episode_id))
+        except KeyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+
+    @app.get("/api/scenarios")
+    def scenarios():
+        active_id = str(holder["active_scenario_id"])
+        return jsonify(
+            {
+                "ok": True,
+                "active_scenario_id": active_id,
+                "default_scenario_id": registry["default_scenario_id"],
+                "scenarios": [
+                    {
+                        **public_entry(entry),
+                        "runtime_graph_name": runtime_graph_name(str(entry["id"])),
+                        "active": str(entry["id"]) == active_id,
+                        "loaded": str(entry["id"]) in holder["engines"],
+                    }
+                    for entry in registry["scenarios"]
+                ],
+            }
+        )
+
+    @app.get("/api/airports")
+    def airports():
+        active_id = str(holder["active_scenario_id"])
+        active_entry = registry_by_id.get(active_id, {})
+        return jsonify(
+            {
+                "ok": True,
+                "active_airport": active_entry.get("airport"),
+                "airports": [
+                    {
+                        "code": entry.get("airport"),
+                        "name": entry.get("airport_name"),
+                        "label": entry.get("label"),
+                        "date": entry.get("date"),
+                        "timezone": entry.get("timezone"),
+                        "summary": entry.get("summary"),
+                        "truth_note": entry.get("modeled_boundary"),
+                        "scenario_id": entry.get("id"),
+                    }
+                    for entry in registry["scenarios"]
+                ],
+            }
+        )
+
+    @app.post("/api/scenarios/select")
+    def select_scenario():
+        body: dict[str, Any] = request.get_json(silent=True) or {}
+        scenario_id = str(body.get("scenario_id", "")).strip()
+        if scenario_id not in registry_by_id:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Unknown scenario_id; choose one returned by /api/scenarios",
+                }
+            ), 404
+        selected = activate_scenario(scenario_id)
+        return jsonify(
+            {
+                "ok": True,
+                "selected": {
+                    **public_entry(registry_by_id[scenario_id]),
+                    "runtime_graph_name": runtime_graph_name(scenario_id),
+                },
+                "snapshot": selected.snapshot(),
+            }
+        )
+
+    @app.post("/api/airports/select")
+    def select_airport():
+        body: dict[str, Any] = request.get_json(silent=True) or {}
+        airport = str(body.get("airport", "")).strip().upper()
+        match = next(
+            (
+                entry
+                for entry in registry["scenarios"]
+                if str(entry.get("airport", "")).upper() == airport
+            ),
+            None,
+        )
+        if match is None:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Unknown airport; choose one returned by /api/airports",
+                }
+            ), 404
+        selected = activate_scenario(str(match["id"]))
+        return jsonify(selected.snapshot())
 
     @app.get("/api/replanning")
     def replanning():

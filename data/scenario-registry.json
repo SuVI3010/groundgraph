@@ -1,0 +1,60 @@
+{
+  "registry_version": "1.0",
+  "default_scenario_id": "ORD-2024-01-12-WINTER-AM",
+  "scenarios": [
+    {
+      "id": "ORD-2024-01-12-WINTER-AM",
+      "airport": "ORD",
+      "airport_name": "Chicago O'Hare International Airport",
+      "label": "O'Hare · Winter recovery",
+      "date": "2024-01-12",
+      "window": "08:00–12:00 CST",
+      "summary": "Snow, low visibility, a baggage exception, and a temporary runway inspection.",
+      "data_path": "data/scenario.json",
+      "graph_name": "groundgraph",
+      "public_inputs": [
+        "BTS January 2024 schedule fields",
+        "NOAA KORD observations",
+        "FAA NASR runway identities and lengths"
+      ],
+      "modeled_boundary": "Gates, rotations at decision time, resource states, capacity effects, operating events, policies, assignments, recovery actions, and projected results are modeled.",
+      "sha256": "28deae48351c6dd6a6accaefdae4e24378c4e42bd089bcc45e67f1395c7ef537"
+    },
+    {
+      "id": "ATL-2024-01-12-THUNDERSTORM-PM",
+      "airport": "ATL",
+      "airport_name": "Hartsfield-Jackson Atlanta International Airport",
+      "label": "Atlanta · Thunderstorm recovery",
+      "date": "2024-01-12",
+      "window": "14:00–18:00 EST",
+      "summary": "A low ceiling deteriorates into heavy rain and a thunderstorm during an afternoon bank.",
+      "data_path": "data/scenarios/atl-2024-01-12.json",
+      "graph_name": "groundgraph_atl",
+      "public_inputs": [
+        "BTS January 2024 schedule fields",
+        "NOAA KATL observations",
+        "FAA NASR runway identities and lengths"
+      ],
+      "modeled_boundary": "Gates, rotations at decision time, resource states, capacity effects, baggage exception, policies, assignments, recovery actions, and projected results are modeled.",
+      "sha256": "88cfbe0c224306c9a5c21bded5ac5675e7b665308668f8ca8c29c20a2cc433b5"
+    },
+    {
+      "id": "SFO-2024-01-06-WIND-RAIN-PM",
+      "airport": "SFO",
+      "airport_name": "San Francisco International Airport",
+      "label": "San Francisco · Wind and rain recovery",
+      "date": "2024-01-06",
+      "window": "13:00–17:00 PST",
+      "summary": "Strong gusts and heavy rain compress a closely connected afternoon departure bank.",
+      "data_path": "data/scenarios/sfo-2024-01-06.json",
+      "graph_name": "groundgraph_sfo",
+      "public_inputs": [
+        "BTS January 2024 schedule fields",
+        "NOAA KSFO observations",
+        "FAA NASR runway identities and lengths"
+      ],
+      "modeled_boundary": "Gates, rotations at decision time, resource states, capacity effects, baggage exception, policies, assignments, recovery actions, and projected results are modeled.",
+      "sha256": "f56cc2ca1c679f0d4b79133498253bec8545472ac19dff2a7bf06b680f18edf1"
+    }
+  ]
+}
