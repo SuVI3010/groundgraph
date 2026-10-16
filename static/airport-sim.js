@@ -88,6 +88,8 @@
       this.snapshot = null;
       this.airportCode = "ORD";
       this.profile = AIRPORT_PROFILES.ORD;
+      this.weatherMode = this.profile.weather;
+      this.observedOnly = false;
       this.runways = FALLBACK_RUNWAYS;
       this.gates = FALLBACK_GATES;
       this.engineAvailable = false;
@@ -114,6 +116,8 @@
       this.snapshot = snapshot || null;
       this.airportCode = String(snapshot?.scenario?.airport || "ORD").toUpperCase();
       this.profile = AIRPORT_PROFILES[this.airportCode] || AIRPORT_PROFILES.ORD;
+      this.weatherMode = String(snapshot?.scenario?.weather_effect || this.profile.weather).toLowerCase();
+      this.observedOnly = snapshot?.scenario?.observed_only === true;
       const resources = Array.isArray(snapshot?.resources) ? snapshot.resources : [];
       const runwayResources = resources.filter((item) => String(item?.type).toUpperCase() === "RUNWAY");
       const gateResources = resources.filter((item) => String(item?.type).toUpperCase() === "GATE");
@@ -229,10 +233,10 @@
       this.drawRunways(context, width, height);
       this.drawTaxiways(context, width, height);
       this.drawTerminal(context, width, height);
-      if (operational) this.drawCapacity(context, width, height, timestamp);
+      if (operational && !this.observedOnly) this.drawCapacity(context, width, height, timestamp);
       const aircraft = this.aircraftStates();
       aircraft.forEach((item) => this.drawFlight(context, width, height, item));
-      if (operational) { this.drawVehicles(context, width, height, timestamp); this.drawWeather(context, width, height, timestamp); }
+      if (operational) { if (!this.observedOnly) this.drawVehicles(context, width, height, timestamp); this.drawWeather(context, width, height, timestamp); }
       const counts = {
         airborne: aircraft.filter((item) => ["airborne", "landing", "takeoff"].includes(item.phase)).length,
         taxiing: aircraft.filter((item) => item.phase === "taxi").length,
@@ -365,7 +369,8 @@
     }
 
     drawWeather(context, width, height, timestamp) {
-      if (this.profile.weather === "snow") {
+      if (this.weatherMode === "none" || this.weatherMode === "clear") return;
+      if (this.weatherMode === "snow") {
         context.fillStyle = "rgba(229,247,250,.42)";
         this.snow.forEach((flake, index) => {
           const y = (flake.y + timestamp * flake.speed) % 1; const x = (flake.x + Math.sin(timestamp / 1100 + index) * 0.008 + 1) % 1;
@@ -374,14 +379,14 @@
         return;
       }
       context.save();
-      context.strokeStyle = this.profile.weather === "storm" ? "rgba(199,226,238,.25)" : "rgba(189,229,243,.20)";
+      context.strokeStyle = this.weatherMode === "storm" ? "rgba(199,226,238,.25)" : "rgba(189,229,243,.20)";
       context.lineWidth = Math.max(0.65, width / 1800);
       this.snow.forEach((drop, index) => {
         const y = (drop.y + timestamp * (drop.speed * 3.2)) % 1;
         const x = (drop.x + timestamp * 0.000006 + index * 0.0003) % 1;
         context.beginPath(); context.moveTo(x * width, y * height); context.lineTo(x * width - width * 0.008, y * height + height * 0.035); context.stroke();
       });
-      if (this.profile.weather === "storm") {
+      if (this.weatherMode === "storm") {
         const flash = Math.max(0, Math.sin(timestamp / 940) - 0.985) * 3.5;
         context.fillStyle = `rgba(255,231,170,${flash})`; context.fillRect(0, 0, width, height);
       }

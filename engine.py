@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import threading
 import time
 import urllib.request
@@ -293,6 +294,44 @@ class GraphBackend:
         return self.graph.query(cypher, params=dict(params or {}))
 
     def close(self) -> None:
+        # Concurrent graph reads can leave several pooled connections open in
+        # FalkorDBLite. Save first, disconnect every pooled client, and stop the
+        # embedded process explicitly so resets cannot orphan Redis. The
+        # official FalkorDB server client follows its normal close path.
+        if self.mode == "lite":
+            embedded = getattr(self.client, "client", None)
+            save = getattr(embedded, "save", None)
+            if callable(save):
+                try:
+                    save()
+                except Exception:
+                    pass
+            pool = getattr(embedded, "connection_pool", None)
+            disconnect = getattr(pool, "disconnect", None)
+            if callable(disconnect):
+                try:
+                    disconnect()
+                except Exception:
+                    pass
+            pid = int(getattr(embedded, "pid", 0) or 0)
+            if pid:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                else:
+                    deadline = time.monotonic() + 0.5
+                    while time.monotonic() < deadline:
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
         close = getattr(self.client, "close", None)
         if callable(close):
             close()

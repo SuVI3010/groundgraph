@@ -8,6 +8,7 @@ const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 
 const ui = {
+  mode: "recovery",
   snapshot: null,
   health: null,
   backend: false,
@@ -38,7 +39,14 @@ const ui = {
   scrubbing: false,
   policyDemo: null,
   brainBusy: false,
+  realStoryPhase: "known",
+  backtests: {
+    runs: [], active: null, results: null, selectedId: null,
+    busy: false, visualHour: 0, targetHour: 0, playProgress: 0,
+  },
 };
+
+const isRealDayMode = () => ui.mode === "real-day";
 
 const UNAVAILABLE_SNAPSHOT = {
   ok: false,
@@ -163,6 +171,380 @@ function normalizeSnapshot(raw) {
   return snapshot;
 }
 
+const RECOVERY_STAGES = '<span data-phase="trigger"><i>1</i><b>Detected</b></span><span data-phase="findings"><i>2</i><b>Read graph</b></span><span data-phase="options"><i>3</i><b>Compared</b></span><span data-phase="choice"><i>4</i><b>Qwen</b></span><span data-phase="guards"><i>5</i><b>Verified</b></span><span data-phase="outcome"><i>6</i><b>Result</b></span><span data-phase="next"><i>7</i><b>Watching</b></span>';
+const REAL_DAY_STAGES = '<span data-real-phase="known"><i>1</i><b>What was known</b></span><span data-real-phase="forecast"><i>2</i><b>Agent forecast</b></span><span data-real-phase="truth"><i>3</i><b>Truth reveal</b></span><span data-real-phase="score"><i>4</i><b>Score</b></span>';
+
+function valueAt(source, path) {
+  return String(path).split(".").reduce((value, key) => value && typeof value === "object" ? value[key] : undefined, source);
+}
+
+function firstPath(sources, ...paths) {
+  for (const source of sources) {
+    for (const path of paths) {
+      const value = valueAt(source, path);
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+  }
+  return undefined;
+}
+
+function backtestRunId(value) {
+  return String(firstPath([obj(value)], "id", "run_id", "backtest_id", "slug") || "");
+}
+
+function backtestState(value = ui.backtests.active) {
+  const active = obj(value);
+  return obj(first(active.snapshot, active.state, active.replay, active.current_snapshot, active));
+}
+
+function backtestMeta(value = ui.backtests.active) {
+  const active = obj(value); const state = backtestState(active);
+  return { ...obj(active.run), ...obj(active.metadata), ...obj(state.metadata), ...active };
+}
+
+function backtestHour(value = ui.backtests.active) {
+  const active = obj(value); const state = backtestState(active); const clock = obj(first(state.clock, active.clock));
+  const explicit = firstPath([active, state, clock], "current_hour", "replay_hour", "hour", "cursor_hour", "revealed_through_hour", "elapsed_hours");
+  if (explicit !== undefined) return Math.max(0, Math.min(24, number(explicit)));
+  const minute = firstPath([clock, state], "minute", "current_minute", "replay_minute");
+  return Math.max(0, Math.min(24, minute === undefined ? 0 : number(minute) / 60));
+}
+
+function backtestIsComplete(value = ui.backtests.active) {
+  const active = obj(value); const state = backtestState(active);
+  const status = String(firstPath([active, state], "status", "phase") || "").toUpperCase();
+  return firstPath([active, state], "complete", "completed", "finished", "done") === true || ["COMPLETE", "COMPLETED", "FINISHED", "SCORED"].includes(status) || backtestHour(active) >= 24;
+}
+
+function normalizeBacktestCatalog(payload) {
+  const root = obj(payload); const data = obj(root.data);
+  const runs = list(first(root.backtests, root.runs, root.available, root.items, data.backtests, data.runs, Array.isArray(payload) ? payload : []));
+  let active = obj(first(root.snapshot, data.snapshot, root.active, data.active, root.current, root.state, root.replay, root.selected));
+  const selectedId = String(first(root.active_backtest_id, root.active_id, root.selected_id, backtestRunId(active), backtestRunId(root.selected), runs.find((run) => run.active || run.selected)?.id, ui.backtests.selectedId, ""));
+  return { runs, active, selectedId };
+}
+
+function absorbBacktestPayload(payload, { keepCatalog = true } = {}) {
+  const normalized = normalizeBacktestCatalog(payload);
+  let active = normalized.active;
+  const root = obj(payload);
+  if (!Object.keys(active).length && (root.run_id || root.backtest_id || root.current_hour !== undefined || root.clock || root.forecast || root.prediction || root.latest_episode)) active = root;
+  if (keepCatalog && normalized.runs.length) ui.backtests.runs = normalized.runs;
+  if (Object.keys(active).length) ui.backtests.active = active;
+  ui.backtests.selectedId = first(normalized.selectedId, backtestRunId(active), ui.backtests.selectedId, backtestRunId(ui.backtests.runs[0]));
+  const hour = backtestHour(ui.backtests.active); ui.backtests.targetHour = hour; ui.backtests.visualHour = hour;
+}
+
+function clockValueToMinute(value, fallback = 0) {
+  if (Number.isFinite(Number(value))) return number(value, fallback);
+  const match = String(value || "").match(/(?:T|\s|^)(\d{1,2}):(\d{2})/);
+  return match ? number(match[1]) * 60 + number(match[2]) : fallback;
+}
+
+function realDayMapSnapshot() {
+  const active = obj(ui.backtests.active); const state = backtestState(active); const meta = backtestMeta(active);
+  const airport = String(firstPath([state, active, meta], "scenario.airport", "airport", "airport_code", "iata") || "ORD").toUpperCase();
+  const hour = backtestHour(active); const rawFlights = list(firstPath([state, active], "movements", "current_movements", "flights", "traffic.flights", "observed_flights", "operations"));
+  const flights = rawFlights.map((flight, index) => {
+    const item = obj(flight); const minute = clockValueToMinute(first(item.minute, item.scheduled_minute, item.estimated_minute, item.scheduled_time, item.time), index * 17);
+    const direction = String(first(item.direction, item.ord_movement, "departure")); const label = first(item.label, item.callsign, [item.reporting_airline, item.flight_number].filter(Boolean).join(" "), item.flight_id, item.movement_id, item.id, `Flight ${index + 1}`);
+    return { ...item, id: first(item.id, item.flight_id, item.movement_id, item.callsign, `REAL-${index + 1}`), label, direction, kind: direction, minute, scheduled_minute: minute, at_risk: number(first(item.delay_minutes, item.actual_delay_minutes), 0) >= 15 || item.cancelled === true || item.diverted === true };
+  });
+  const observations = list(firstPath([state, active], "observations", "observed_inputs", "inputs"));
+  const events = list(firstPath([state, active], "events")).length ? list(firstPath([state, active], "events")) : observations.map((item, index) => ({ ...obj(item), id: first(item.id, `OBS-${index + 1}`), type: first(item.type, item.kind, "WEATHER_UPDATE"), at_minute: clockValueToMinute(first(item.at_minute, item.minute, item.time), Math.max(0, hour * 60 - 60)), source_kind: "OBSERVED" }));
+  const latestWeather = obj(firstPath([state, active], "weather.latest.observed", "weather.latest")); const weatherCodes = String(first(latestWeather.weather_codes, "")).toUpperCase(); const precipitation = number(latestWeather.precipitation_1h_in, 0);
+  const weatherEffect = /TS/.test(weatherCodes) ? "storm" : /SN/.test(weatherCodes) ? "snow" : /RA|DZ/.test(weatherCodes) || precipitation > 0 ? "rain" : "none";
+  return {
+    ok: true,
+    scenario: { ...obj(state.scenario), airport, airport_name: firstPath([state, active, meta], "scenario.airport_name", "airport_name", "name") || "Chicago O’Hare International Airport", date: firstPath([state, active, meta], "scenario.date", "service_date", "date", "day") || "", base_clock_minute: 0, start_minute: 0, end_minute: 1440, weather_effect: weatherEffect, observed_only: true },
+    clock: { minute: hour * 60, cycle: Math.round(hour) }, state_version: number(firstPath([state, active], "state_version", "graph_version"), Math.round(hour) + 1),
+    flights, resources: list(firstPath([state, active], "resources")), events,
+    current_plan: null, metrics: obj(firstPath([state, active], "metrics")), replanning: { history: [] }, graph: obj(firstPath([state, active], "graph")),
+  };
+}
+
+function metricText(value, suffix = "") {
+  if (value === undefined || value === null || value === "") return "—";
+  return `${Number.isFinite(Number(value)) ? Math.round(Number(value) * 10) / 10 : value}${suffix}`;
+}
+
+function backtestData(kind) {
+  const active = obj(ui.backtests.active); const state = backtestState(active);
+  const episode = displayBacktestEpisode();
+  const paths = {
+    known: ["observed_inputs", "observations", "known", "inputs", "available_inputs"],
+    forecast: ["forecast", "prediction", "agent_forecast", "model_output", "predictions"],
+    truth: ["ground_truth", "observed_outcome", "outcome", "actual", "result"],
+  };
+  if (kind === "known") return firstPath([episode], "input") || { "Scheduled next hour": firstPath([state, active], "schedule.next_hour_count"), "Weather observations": firstPath([state, active], "weather.visible_count"), "Latest weather": firstPath([state, active], "weather.latest.raw_metar", "weather.latest.summary") };
+  if (kind === "forecast") return firstPath([episode], "forecast") || firstPath([active, state], ...(paths[kind] || []));
+  if (kind === "truth") return firstPath([episode], "evaluation.actual") || firstPath([active, state], ...(paths[kind] || []));
+  return firstPath([active, state], ...(paths[kind] || []));
+}
+
+function displayBacktestEpisode() {
+  const active = obj(ui.backtests.active); const state = backtestState(active); const results = obj(ui.backtests.results); const episodes = list(results.episodes);
+  const displayedId = String(first(results.display_episode_id, firstPath([active, state], "display_episode.id"), ""));
+  return obj(
+    firstPath([active, state], "display_episode")
+    || episodes.find((item) => String(item.id) === displayedId)
+    || [...episodes].reverse().find((item) => hasBacktestData(obj(item).evaluation?.actual))
+    || firstPath([active, state], "latest_episode"),
+  );
+}
+
+function backtestScoreSummary() {
+  const active = obj(ui.backtests.active); const state = backtestState(active); const results = obj(ui.backtests.results);
+  const cumulative = obj(first(results.cumulative_scores, active.cumulative_scores, state.cumulative_scores));
+  const complete = list(results.episodes).filter((item) => String(obj(item).evaluation?.status).toUpperCase() === "COMPLETE");
+  const selectedErrors = complete.map((item) => number(obj(item).evaluation?.selected_score?.mean_delay_abs_error_minutes, NaN)).filter(Number.isFinite);
+  const baselineErrors = complete.map((item) => {
+    const score = list(obj(item).evaluation?.candidate_scores).find((candidate) => String(candidate.method).toUpperCase() === "SCHEDULE_BASELINE");
+    return number(score?.mean_delay_abs_error_minutes, NaN);
+  }).filter(Number.isFinite);
+  const mean = (values) => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10 : undefined;
+  return {
+    ...cumulative,
+    groundgraph_mae: first(cumulative.selected_mean_delay_mae_minutes, cumulative.mean_mean_delay_abs_error_minutes, mean(selectedErrors)),
+    baseline_mae: first(cumulative.schedule_baseline_mean_delay_mae_minutes, mean(baselineErrors)),
+    hours_scored: first(cumulative.complete_windows, complete.length),
+  };
+}
+
+function hasBacktestData(value) {
+  return Array.isArray(value) ? value.length > 0 : value && typeof value === "object" ? Object.keys(value).length > 0 : value !== undefined && value !== null && value !== "";
+}
+
+function runLabel(run) {
+  const item = obj(run); const date = first(item.date, item.day, item.scenario_date);
+  return first(item.label, item.title, item.name, date ? `O’Hare · ${formatDate(date)}` : null, backtestRunId(item), "O’Hare real-day replay");
+}
+
+function setRealDayPhase(phase = "known") {
+  const valid = ["known", "forecast", "truth", "score"].includes(phase) ? phase : "known"; ui.realStoryPhase = valid;
+  document.querySelectorAll("#real-day-story > [data-real-phase]").forEach((section) => { const selected = section.dataset.realPhase === valid; section.classList.toggle("story-active", selected); section.setAttribute("aria-hidden", String(!selected)); });
+  document.querySelectorAll("#stage-rail > [data-real-phase]").forEach((step) => { const selected = step.dataset.realPhase === valid; step.classList.toggle("viewing", selected); step.setAttribute("aria-current", selected ? "step" : "false"); });
+}
+
+function renderBacktestMenu() {
+  const menu = $("airport-menu"); if (!menu) return;
+  const activeId = String(ui.backtests.selectedId || backtestRunId(ui.backtests.active));
+  menu.innerHTML = ui.backtests.runs.length ? ui.backtests.runs.map((run) => {
+    const id = backtestRunId(run); const active = id === activeId; const airport = String(first(run.airport, run.airport_code, "ORD")).toUpperCase();
+    return `<button type="button" class="airport-option ${active ? "active" : ""}" role="option" data-backtest="${escapeHtml(id)}" aria-selected="${active}"><i>${escapeHtml(airport)}</i><span><strong>${escapeHtml(runLabel(run))}</strong><small>BTS domestic carrier cohort + KORD weather</small></span><em>${active ? "ACTIVE" : "OPEN"}</em></button>`;
+  }).join("") : '<span class="log-empty">No real-day runs are available yet.</span>';
+  menu.hidden = !ui.airportMenuOpen; $("airport-switcher").setAttribute("aria-expanded", String(ui.airportMenuOpen));
+}
+
+function renderRealDay({ advanceStory = false } = {}) {
+  if (!isRealDayMode()) return;
+  const active = obj(ui.backtests.active); const state = backtestState(active); const meta = backtestMeta(active); const hour = backtestHour(active);
+  const episode = displayBacktestEpisode(); const known = backtestData("known"); const forecast = backtestData("forecast"); const truth = backtestData("truth"); const scores = backtestScoreSummary();
+  const input = obj(episode.input); const evaluation = obj(episode.evaluation); const truthScope = String(evaluation.truth_scope || "SEALED").toUpperCase();
+  const evaluationStatus = String(evaluation.status || "").toUpperCase();
+  const archiveSettled = truthScope === "END_OF_DAY_ARCHIVE_SETTLEMENT"; const timeGatedReveal = truthScope === "TIME_GATED_AGENT_VISIBLE_OUTCOMES";
+  const timeGatedComplete = timeGatedReveal && evaluationStatus === "COMPLETE"; const timeGatedPartial = timeGatedReveal && !timeGatedComplete; const settledTruth = archiveSettled || timeGatedComplete;
+  const storyMinute = Math.max(0, Math.min(1440, number(first(episode.issued_minute, hour * 60)))); const storyHour = storyMinute / 60;
+  const storyClock = first(episode.issued_time, `${String(Math.floor(storyMinute / 60)).padStart(2, "0")}:${String(Math.floor(storyMinute % 60)).padStart(2, "0")}`);
+  const episodeMovementCount = first(input.scheduled_movements, list(episode.target_movement_ids).length || undefined, obj(forecast).predicted_movements);
+  const hasForecast = hasBacktestData(forecast); const hasTruth = hasBacktestData(truth); const hasScores = number(scores.hours_scored, 0) > 0 && Number.isFinite(Number(scores.groundgraph_mae));
+  const run = ui.backtests.runs.find((item) => backtestRunId(item) === String(ui.backtests.selectedId)) || meta;
+  const airport = String(firstPath([state, active, run], "scenario.airport", "airport", "airport_code") || "ORD").toUpperCase(); const date = firstPath([state, active, run], "scenario.date", "service_date", "date", "day");
+
+  $("airport-code").textContent = airport; $("airport-name").textContent = first(runLabel(run), "O’Hare real day");
+  $("scenario-label").textContent = date ? `Time-gated historical replay · ${formatDate(date)}` : "Time-gated historical replay · recorded day";
+  $("window-label").textContent = "00:00–24:00 CT"; document.querySelector(".replay-window small").textContent = "forecast, reveal, then score";
+  $("truth-badge").textContent = ui.backend ? `REAL ${airport} DATA` : "ENGINE UNAVAILABLE"; $("truth-badge").className = `truth-badge ${ui.backend ? "live" : "unavailable"}`;
+  $("sealed-label").textContent = archiveSettled ? "RAW ARCHIVE ROWS STAY SEALED" : "FUTURE OUTCOMES SEALED";
+  const graphMode = String(firstPath([state, active], "graph.mode", "graph.runtime_mode") || "unavailable").toLowerCase();
+  $("graph-status").querySelector("small").textContent = ui.backend ? `${graphMode} · factual replay graph` : "required to run";
+  $("surface-kicker").textContent = "TIME-GATED REPLAY"; $("surface-title").textContent = `${airport} · recorded BTS flights + KORD weather`;
+  $("clock-label").textContent = "REVEALED THROUGH"; $("clock-zone").textContent = "CT";
+  $("weather-primary").textContent = firstPath([state, active, known], "weather.latest.observed.raw_metar", "weather.latest.raw_metar", "weather.latest.summary", "weather.summary", "weather.condition", "conditions", "summary") || "Observed weather available to the agents";
+  $("weather-secondary").textContent = `Inputs stop at ${String(Math.floor(hour)).padStart(2, "0")}:00 · future records remain hidden`;
+  $("weather-provenance").textContent = "OBSERVED INPUTS"; $("weather-provenance").className = "provenance-tag observed";
+  $("timeline").min = "0"; $("timeline").max = "24"; $("timeline").step = "1"; $("timeline").value = String(hour);
+  $("timeline-start").textContent = "00:00"; $("timeline-end").textContent = "24:00"; $("event-marker").textContent = `forecast ${storyClock}`;
+  $("decision-marker").textContent = archiveSettled ? "archive 24:00" : `reveal ${String(Math.min(24, Math.floor(storyHour) + 1)).padStart(2, "0")}:00`;
+  $("jump-button").querySelector("span").textContent = "Reveal"; $("jump-button").querySelector("strong").textContent = "next hour";
+  $("story-kicker").textContent = "ONE-DAY PIPELINE CHECK"; $("story-headline").textContent = "Observe → forecast → reveal → score"; $("story-subtitle").textContent = "Agents never see the future outcome before committing a forecast.";
+  $("cycle-label").textContent = "HOUR"; $("cycle-number").textContent = String(Math.floor(storyHour)).padStart(2, "0");
+
+  $("incident-kicker").textContent = backtestIsComplete(active) ? "TIME-GATED REPLAY COMPLETE" : "TIME-GATED REPLAY IN PROGRESS";
+  $("incident-provenance").textContent = "OBSERVED INPUTS"; $("incident-provenance").className = "provenance-tag observed";
+  $("incident-title").textContent = hasForecast ? `${storyClock}: forecast committed before truth` : "Waiting for the first hourly forecast";
+  $("incident-detail").textContent = hasForecast ? `${metricText(episodeMovementCount)} scheduled BTS cohort movements entered this saved forecast window.` : "Recorded BTS traffic and KORD weather enter in time order; the next outcome remains sealed.";
+  $("event-time").textContent = storyClock; $("event-symbol").textContent = hasTruth ? "✓" : "◌";
+  $("event-title").textContent = archiveSettled ? "End-of-day archive settlement complete" : timeGatedComplete ? "Actual-time outcome is complete" : timeGatedPartial ? "Actual-time outcomes revealed so far" : hasTruth ? "Ground truth revealed after the forecast" : "Observed inputs released; future outcome sealed";
+  $("event-detail").textContent = archiveSettled ? "The replay reached 24:00, so sealed archive labels can settle this forecast." : timeGatedComplete ? "Every operated outcome in this forecast window had occurred by the replay clock." : timeGatedPartial ? "Only outcomes that had occurred by the replay clock are visible." : hasTruth ? "This forecast window can now be compared with the baseline." : "Advance one hour to reveal what actually happened.";
+  $("event-provenance").textContent = hasTruth ? "OBSERVED OUTCOME" : "OBSERVED INPUTS"; $("event-provenance").className = "provenance-tag observed";
+
+  const forecastDelay = firstPath([forecast], "predicted_mean_delay_minutes", "delay_minutes", "predicted_delay_minutes", "total_delay_minutes", "delay", "prediction");
+  const actualDelay = firstPath([truth], "mean_delay_minutes", "delay_minutes", "actual_delay_minutes", "total_delay_minutes", "delay", "actual");
+  $("delay-label").textContent = "Mean delay · forecast → actual"; $("flights-label").textContent = `Scheduled movements · ${first(episode.horizon_label, `${storyClock} window`)}`; $("checks-label").textContent = "Truth reveal";
+  $("delay-before").textContent = forecastDelay !== undefined ? `${metricText(forecastDelay, "m")}` : "—"; $("delay-after").textContent = hasTruth && actualDelay !== undefined ? metricText(actualDelay, "m") : "SEALED";
+  $("delay-delta").textContent = "forecast → observed outcome"; $("flights-before").textContent = metricText(episodeMovementCount); $("flights-after").textContent = metricText(episodeMovementCount); $("flights-delta").textContent = "saved forecast-window input";
+  $("checks-value").textContent = settledTruth ? "COMPLETE" : timeGatedPartial ? "PARTIAL" : hasTruth ? "REVEALED" : "SEALED"; $("checks-detail").textContent = archiveSettled ? "end-of-day archive settlement" : timeGatedComplete ? "all outcomes in this window observed" : timeGatedPartial ? "actual-time outcomes still arriving" : hasTruth ? "forecast recorded before reveal" : "future outcome is inaccessible";
+
+  $("real-known-time").textContent = storyClock;
+  $("real-known-title").textContent = `Only records available by ${storyClock}`;
+  $("real-known-copy").textContent = "The agents receive BTS reporting-carrier domestic records and KORD weather through this clock. Later events remain hidden.";
+  const weatherSignals = list(input.weather_signals); const weatherBrief = weatherSignals.length ? weatherSignals.slice(0, 2).join(" · ") : input.weather_hazard_score !== undefined ? "No active hazard" : "Saved with forecast";
+  let knownMarkup = `<article class="real-fact observed"><small>Scheduled next hour</small><strong>${escapeHtml(metricText(episodeMovementCount))}</strong><em>published movements</em></article><article class="real-fact observed"><small>Weather known at issue</small><strong>${escapeHtml(weatherBrief)}</strong><em>time-gated KORD observations</em></article><article class="real-fact observed"><small>Input watermark</small><strong>${escapeHtml(storyClock)}</strong><em>nothing later entered the forecast</em></article><article class="real-fact observed"><small>Future outcomes</small><strong>SEALED</strong><em>not available to agents</em></article>`;
+  $("real-known-facts").innerHTML = knownMarkup;
+
+  $("real-forecast-title").textContent = hasForecast ? "The agents committed this forecast" : "Waiting for the first bounded forecast";
+  $("real-forecast-copy").textContent = hasForecast ? "This prediction is saved before the next observed outcome becomes visible." : "Advance the replay to let the agents read the released graph and record a prediction.";
+  $("real-forecast-status").textContent = hasForecast ? "COMMITTED" : "WAITING";
+  const forecastObject = obj(forecast); const predictedMovements = first(forecastObject.predicted_movements, input.scheduled_movements); const predictedDisrupted = first(forecastObject.predicted_disrupted_count, forecastObject.predicted_disruption_rate_pct); const handoffCount = number(first(episode.handoff_count, list(episode.handoffs).length || null), number(active.handoff_count) && number(active.episode_count) ? Math.round(number(active.handoff_count) / number(active.episode_count)) : 0);
+  $("real-forecast-facts").innerHTML = hasForecast ? `<article class="real-fact forecast"><small>Chosen forecast</small><strong>${escapeHtml(first(forecastObject.label, humanize(forecastObject.method), "Agent forecast"))}</strong><em>${escapeHtml(shortStatus(first(forecastObject.selected_by, "bounded model output")))}</em></article><article class="real-fact forecast"><small>Mean delay forecast</small><strong>${escapeHtml(metricText(forecastObject.predicted_mean_delay_minutes, " min"))}</strong><em>next-hour cohort average</em></article><article class="real-fact forecast"><small>Disruptions forecast</small><strong>${escapeHtml(metricText(predictedDisrupted))}${predictedMovements ? ` / ${escapeHtml(metricText(predictedMovements))}` : ""}</strong><em>scheduled cohort movements</em></article><article class="real-fact forecast"><small>Agent handoffs</small><strong>${escapeHtml(metricText(handoffCount))}</strong><em>persisted before selection</em></article>` : '<div class="real-seal"><b>NO FORECAST YET</b><small>Release the first hour to begin the time-gated replay.</small></div>';
+  const candidates = list(episode.candidates); const handoffs = list(episode.handoffs); const selectedCandidateId = String(first(forecastObject.candidate_id, forecastObject.id, ""));
+  $("real-decision-explain").hidden = !hasForecast;
+  if (hasForecast) {
+    $("real-choice-title").textContent = `${first(forecastObject.selected_by, "Coordinator").toString().toLowerCase() === "local_model" ? "Local Qwen" : "Safe coordinator"} chose ${first(forecastObject.label, humanize(forecastObject.method), "this forecast")} from ${candidates.length || list(forecastObject.allowlisted_candidate_ids).length || 1} allowed options`;
+    const modelReason = first(forecastObject.selection_summary, "The coordinator returned an allowlisted candidate ID."); const candidateAssumption = first(forecastObject.explanation, "The candidate was saved before ground truth became visible.");
+    $("real-choice-copy").textContent = `${modelReason} Candidate assumption: ${candidateAssumption}`;
+    $("real-candidates").innerHTML = candidates.map((candidate) => {
+      const selected = String(candidate.id) === selectedCandidateId || String(candidate.method) === String(forecastObject.method);
+      return `<article class="real-candidate ${selected ? "selected" : ""}"><small>${selected ? "SELECTED" : "COMPARED"}</small><strong>${escapeHtml(first(candidate.label, humanize(candidate.method), "Forecast"))}</strong><em>${escapeHtml(metricText(candidate.predicted_mean_delay_minutes, " min"))} mean delay · ${escapeHtml(metricText(candidate.predicted_disruption_rate_pct, "%"))} disrupted</em></article>`;
+    }).join("");
+    $("real-agent-summary").textContent = `${handoffs.length || handoffCount} graph agents → one coordinator decision`;
+    $("real-agent-handoffs").innerHTML = handoffs.map((handoff) => `<div class="real-agent-handoff"><b>${escapeHtml(first(handoff.agent_name, humanize(handoff.query_name), "Specialist"))}</b><span>${escapeHtml(first(handoff.summary, "Evidence persisted in FalkorDB."))}</span></div>`).join("");
+  }
+
+  $("real-truth-title").textContent = archiveSettled ? "End-of-day archive settlement is complete" : timeGatedComplete ? "This actual-time window is complete" : timeGatedPartial ? "Actual-time outcomes revealed so far" : hasTruth ? "Recorded outcomes are now visible" : "The next outcome is still sealed";
+  $("real-truth-copy").textContent = archiveSettled ? "The 24-hour replay has ended. Sealed cancellation, diversion, and post-midnight labels can now settle the saved forecast." : timeGatedComplete ? "Every operated movement in this forecast window had reached its actual outcome by the replay clock." : timeGatedPartial ? "Only movements that had actually occurred by this replay clock are shown. The remaining outcomes stay sealed." : hasTruth ? "The reveal happened only after the forecast was committed." : "Advance the replay to reveal what actually happened after the saved forecast.";
+  $("real-truth-status").textContent = settledTruth ? "COMPLETE" : timeGatedPartial ? "PARTIAL" : hasTruth ? "REVEALED" : "SEALED";
+  const truthObject = obj(truth);
+  const revealNote = archiveSettled ? "end-of-day archive settlement" : timeGatedComplete ? "complete actual-time window" : "actual-time reveal"; const archiveOnlyNote = settledTruth ? revealNote : "sealed until this window is complete";
+  $("real-truth-facts").innerHTML = hasTruth ? `<article class="real-fact truth"><small>Actual mean delay</small><strong>${escapeHtml(metricText(truthObject.mean_delay_minutes, " min"))}</strong><em>${escapeHtml(revealNote)}</em></article><article class="real-fact truth"><small>Actual disruptions</small><strong>${escapeHtml(metricText(truthObject.disrupted))} / ${escapeHtml(metricText(truthObject.movements))}</strong><em>${escapeHtml(metricText(truthObject.disruption_rate_pct, "%"))} of revealed movements</em></article><article class="real-fact truth"><small>Actual cancellations</small><strong>${settledTruth ? escapeHtml(metricText(truthObject.cancelled)) : "SEALED"}</strong><em>${escapeHtml(archiveOnlyNote)}</em></article><article class="real-fact truth"><small>Actual diversions</small><strong>${settledTruth ? escapeHtml(metricText(truthObject.diverted)) : "SEALED"}</strong><em>${escapeHtml(archiveOnlyNote)}</em></article>` : '<div class="real-seal"><b>OUTCOME SEALED</b><small>The agents cannot read the next hour’s actual result.</small></div>';
+
+  const modelError = firstPath([scores], "groundgraph_mae", "agent_mae", "model_mae", "mae", "groundgraph.error", "agent.error", "mean_mean_delay_abs_error_minutes");
+  const baselineError = firstPath([scores], "baseline_mae", "baseline.error", "baseline_error");
+  const hoursScored = firstPath([scores], "hours_scored", "count", "samples", "evaluated_hours");
+  const modelLeads = Number.isFinite(Number(modelError)) && Number.isFinite(Number(baselineError)) && Number(modelError) < Number(baselineError);
+  const cancelError = first(scores.mean_cancel_rate_abs_error_pp, scores.cancel_rate_mae_pp); const disruptionError = first(scores.mean_disruption_rate_abs_error_pp, scores.disruption_rate_mae_pp); const bandAccuracy = scores.delay_band_accuracy_pct;
+  const scoredTargets = first(scores.scored_target_movements, scores.target_movements_scored); const delayBearing = first(scores.delay_bearing_outcomes, scores.observed_delay_outcomes); const unavailableDelay = first(scores.unavailable_delay_outcomes, scores.unavailable_endpoint_delay_outcomes); const cancelledOutcomes = scores.cancelled_outcomes;
+  $("real-score-title").textContent = hasScores ? "Descriptive accuracy on settled hourly cohorts" : "Scoring opens after ground truth";
+  $("real-score-copy").textContent = hasScores ? `One selected day, not held out. Mean-delay MAE is the unweighted average of ${metricText(hoursScored)} hourly cohort-mean errors${delayBearing !== undefined && scoredTargets !== undefined ? `, using ${metricText(delayBearing)} delay-bearing records from ${metricText(scoredTargets)} target movements` : ""}; ${cancelledOutcomes !== undefined ? `${metricText(cancelledOutcomes)} cancellations and ` : "cancellations and "}${unavailableDelay !== undefined ? `${metricText(unavailableDelay)} unavailable endpoint delays` : "unavailable endpoint delays"} are excluded. This validates the time-gated pipeline, not generalization or isolated model lift.` : "The forecasts and schedule-only zero-delay baseline are scored on the same forecast windows after recorded outcomes are revealed.";
+  $("real-score-status").textContent = hasScores ? (backtestIsComplete(active) ? "FINAL" : "CUMULATIVE") : "WAITING";
+  $("real-scoreboard").innerHTML = hasScores ? `<article class="score-card ${modelLeads ? "leading" : ""}"><small>Agent hourly mean-delay MAE</small><strong>${escapeHtml(metricText(modelError, " min"))}</strong><em>unweighted cohort means</em></article><article class="score-card ${modelLeads ? "" : "leading"}"><small>Schedule zero-delay MAE</small><strong>${escapeHtml(metricText(baselineError, " min"))}</strong><em>same targets and outcomes</em></article><article class="score-card"><small>Settled forecast windows</small><strong>${escapeHtml(metricText(hoursScored))}</strong><em>complete hourly cohorts</em></article><article class="score-card"><small>Cancellation-rate MAE</small><strong>${escapeHtml(metricText(cancelError, " pp"))}</strong><em>agent forecast</em></article><article class="score-card"><small>Disruption-rate MAE</small><strong>${escapeHtml(metricText(disruptionError, " pp"))}</strong><em>agent forecast</em></article><article class="score-card"><small>Delay-band accuracy</small><strong>${escapeHtml(metricText(bandAccuracy, "%"))}</strong><em>agent forecast</em></article>` : '<div class="real-seal"><b>NO SCORE YET</b><small>A score appears only after forecast → truth reveal.</small></div>';
+
+  const latestPhase = hasScores ? "score" : hasTruth ? "truth" : hasForecast ? "forecast" : "known";
+  document.querySelectorAll("#stage-rail > [data-real-phase]").forEach((step) => {
+    const order = ["known", "forecast", "truth", "score"]; const index = order.indexOf(step.dataset.realPhase); const latestIndex = order.indexOf(latestPhase);
+    step.classList.toggle("complete", index < latestIndex || index === latestIndex && latestPhase === "score" && backtestIsComplete(active)); step.classList.toggle("active", index === latestIndex);
+  });
+  if (advanceStory) ui.realStoryPhase = latestPhase; setRealDayPhase(ui.realStoryPhase);
+  $("replan-state").textContent = ui.backtests.busy ? "Agents are forecasting this hour" : backtestIsComplete(active) ? "24-hour test complete" : `Next outcome sealed until ${String(Math.min(24, Math.round(hour) + 1)).padStart(2, "0")}:00`;
+  $("replan-next").textContent = backtestIsComplete(active) ? "Final cumulative score available" : "Advance one hour to reveal and score";
+  $("primary-action-label").textContent = ui.backtests.busy ? "Forecasting…" : backtestIsComplete(active) ? "View final score" : "Forecast + reveal next hour";
+  $("primary-action").disabled = ui.backtests.busy || !ui.backend;
+  $("footer-status").textContent = `GroundGraph · time-gated ${airport} BTS cohort · ${Math.round(hour)}/24 hours revealed`;
+  document.querySelector(".app-footer span:last-child").textContent = "Forecasts are model outputs; no saved-minutes claim";
+  renderBacktestMenu();
+  const mapSnapshot = realDayMapSnapshot(); ui.map?.setSnapshot(mapSnapshot); ui.map?.setEngineAvailable(ui.backend); ui.map?.setTime(hour * 60);
+  $("replay-clock").textContent = `${String(Math.floor(hour)).padStart(2, "0")}:00`;
+}
+
+function setBacktestBusy(active) {
+  ui.backtests.busy = Boolean(active); $("replan-radar")?.classList.toggle("running", Boolean(active));
+  if (isRealDayMode() && Object.keys(obj(ui.backtests.active)).length) renderRealDay();
+  syncEngineAvailability();
+}
+
+async function loadBacktestResults() {
+  try { ui.backtests.results = obj(await request("/api/backtests/results", { timeout: 20000 })); }
+  catch (error) { if (![404, 409, 422].includes(number(error?.status))) throw error; }
+}
+
+function handleBacktestFailure(error, fallbackMessage) {
+  setPlaying(false);
+  const status = number(error?.status, NaN); const serverOrNetworkFailure = !Number.isFinite(status) || status >= 500;
+  if (serverOrNetworkFailure) {
+    enterEngineUnavailable(error, { preserveSnapshot: true });
+    showToast("Engine unavailable — real-day replay frozen");
+    return true;
+  }
+  showToast(first(error?.message, fallbackMessage));
+  return false;
+}
+
+async function loadBacktests({ refreshActive = false } = {}) {
+  setBacktestBusy(true);
+  try {
+    const payload = await request("/api/backtests", { timeout: 20000 }); absorbBacktestPayload(payload);
+    const selectedId = first(ui.backtests.selectedId, backtestRunId(ui.backtests.runs[0]));
+    if ((refreshActive || !Object.keys(obj(ui.backtests.active)).length) && ui.backtests.runs.length) {
+      if (!await selectBacktest(selectedId, { quiet: true, force: true })) return false;
+    }
+    else { await loadBacktestResults(); renderRealDay({ advanceStory: true }); }
+    return true;
+  } catch (error) {
+    if (!handleBacktestFailure(error, "Real-day test could not load")) {
+      $("story-headline").textContent = "Real-day test is not available"; $("story-subtitle").textContent = first(error.message, "The historical test endpoint did not respond.");
+      $("real-known-facts").innerHTML = '<div class="real-seal"><b>TEST DATA UNAVAILABLE</b><small>Recovery demo remains available while the real-day run reconnects.</small></div>';
+    }
+    return false;
+  } finally { setBacktestBusy(false); }
+}
+
+async function selectBacktest(id, { quiet = false, force = false, reset = false } = {}) {
+  if (!id || ui.backtests.busy && !force) return false;
+  setPlaying(false); ui.backtests.playProgress = 0; setBacktestBusy(true); ui.airportMenuOpen = false;
+  try {
+    const payload = await request("/api/backtests/select", { method: "POST", body: JSON.stringify({ id, backtest_id: id, reset: Boolean(reset) }), timeout: 300000 });
+    ui.backtests.selectedId = String(id); ui.backtests.results = null; absorbBacktestPayload(payload, { keepCatalog: false });
+    await loadBacktestResults(); renderRealDay({ advanceStory: true }); if (!quiet) showToast("Real ORD day loaded with outcomes sealed");
+    return true;
+  } catch (error) { handleBacktestFailure(error, "Could not open that real-day run"); return false; }
+  finally { setBacktestBusy(false); }
+}
+
+async function tickBacktest(hours = 1) {
+  if (ui.backtests.busy || !ui.backend || backtestIsComplete()) { if (backtestIsComplete()) { ui.realStoryPhase = "score"; setRealDayPhase("score"); } return; }
+  setBacktestBusy(true);
+  try {
+    const stepHours = Math.max(1, Math.min(24, Math.round(number(hours, 1))));
+    const payload = await request("/api/backtests/tick", { method: "POST", body: JSON.stringify({ hours: stepHours, minutes: stepHours * 60 }), timeout: 300000 });
+    absorbBacktestPayload(payload, { keepCatalog: false }); await loadBacktestResults(); renderRealDay({ advanceStory: true });
+    if (backtestIsComplete()) { setPlaying(false); showToast("24-hour time-gated replay complete — final score revealed"); }
+  } catch (error) { handleBacktestFailure(error, "The real-day replay could not advance"); }
+  finally { setBacktestBusy(false); }
+}
+
+async function seekBacktest(target) {
+  if (ui.backtests.busy || !ui.backend) { ui.scrubbing = false; return; }
+  const goal = Math.max(0, Math.min(24, Math.round(number(target)))); const id = String(ui.backtests.selectedId || backtestRunId(ui.backtests.active)); if (!id) return;
+  ui.backtests.playProgress = 0;
+  setPlaying(false); setBacktestBusy(true);
+  try {
+    const reset = await request("/api/backtests/select", { method: "POST", body: JSON.stringify({ id, backtest_id: id, reset: true }), timeout: 300000 }); absorbBacktestPayload(reset, { keepCatalog: false });
+    if (goal > 0) { const moved = await request("/api/backtests/tick", { method: "POST", body: JSON.stringify({ to_minute: goal * 60 }), timeout: 300000 }); absorbBacktestPayload(moved, { keepCatalog: false }); }
+    await loadBacktestResults(); renderRealDay({ advanceStory: true });
+  } catch (error) { handleBacktestFailure(error, "Could not move the real-day clock"); }
+  finally { ui.scrubbing = false; setBacktestBusy(false); }
+}
+
+async function switchMode(mode) {
+  const next = mode === "real-day" ? "real-day" : "recovery"; if (next === ui.mode) return;
+  setPlaying(false); ui.mode = next; ui.airportMenuOpen = false; ui.selectedTab = null; $("proof-drawer").hidden = true;
+  const real = isRealDayMode(); document.body.classList.toggle("real-day-mode", real);
+  document.querySelectorAll(".real-day-only").forEach((node) => { node.hidden = !real; });
+  document.querySelectorAll("#mode-switch [data-mode]").forEach((button) => { const active = button.dataset.mode === next; button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active)); });
+  $("stage-rail").innerHTML = real ? REAL_DAY_STAGES : RECOVERY_STAGES; $("decision-story").hidden = real; $("real-day-story").hidden = !real;
+  if (real) {
+    $("map-watermark").querySelector("strong").textContent = "ORD BTS DOMESTIC COHORT"; $("map-watermark").querySelector("span").textContent = "Recorded schedule timing · schematic surface positions";
+    await loadBacktests();
+  } else {
+    $("surface-kicker").textContent = "OPERATIONS REPLAY"; $("clock-label").textContent = "REPLAY TIME"; $("story-kicker").textContent = "DECISION STORY"; $("cycle-label").textContent = "DECISION";
+    $("weather-provenance").textContent = "OBSERVED"; $("delay-label").textContent = "Downstream delay"; $("flights-label").textContent = "Flights in impact path"; $("checks-label").textContent = "Execution guard"; $("map-watermark").querySelector("strong").textContent = "MODELED OPERATIONS SANDBOX"; $("map-watermark").querySelector("span").textContent = "Historical inputs · no live airport control";
+    $("jump-button").querySelector("span").textContent = "Jump to"; $("jump-button").querySelector("strong").textContent = "first disruption";
+    document.querySelector(".replay-window small").textContent = "historical replay sandbox"; document.querySelector(".app-footer span:last-child").textContent = "Projected under replay assumptions · no live airport control";
+    renderSnapshot(ui.snapshot || UNAVAILABLE_SNAPSHOT); setPlaying(false);
+  }
+}
+
 function activeEvent(snapshot = ui.snapshot) {
   const minute = number(snapshot?.clock?.minute);
   return [...list(snapshot?.events)].filter((event) => number(event.at_minute) <= minute).sort((a, b) => number(b.at_minute) - number(a.at_minute))[0]
@@ -189,10 +571,11 @@ function formatRuntimeTime(value) {
 }
 
 function renderRuntime() {
-  const snapshot = ui.snapshot; const health = obj(ui.health); const graph = obj(snapshot.graph);
-  const truth = $("truth-badge"); truth.textContent = ui.backend ? "LIVE GRAPH STATE" : "ENGINE UNAVAILABLE"; truth.classList.toggle("live", ui.backend); truth.classList.toggle("unavailable", !ui.backend);
+  const snapshot = ui.snapshot; const health = obj(ui.health); const recoveryGraph = obj(snapshot?.graph); const active = obj(ui.backtests.active); const state = backtestState(active); const factualGraph = obj(firstPath([state, active], "graph"));
+  const truth = $("truth-badge"); truth.textContent = isRealDayMode() && ui.backend ? "REAL ORD DATA" : ui.backend ? "LIVE GRAPH STATE" : "ENGINE UNAVAILABLE"; truth.classList.toggle("live", ui.backend); truth.classList.toggle("unavailable", !ui.backend);
   const graphStatus = $("graph-status"); graphStatus.className = `runtime-pill ${ui.backend ? "ready" : "warn"}`;
-  graphStatus.querySelector("small").textContent = ui.backend ? `${first(graph.runtime_mode, health.runtime_mode, "server")} · ${number(graph.node_count, number(health.node_count, 0))} nodes` : "required to run";
+  const graphMode = String(isRealDayMode() ? first(factualGraph.mode, factualGraph.runtime_mode, "unavailable") : first(recoveryGraph.runtime_mode, recoveryGraph.mode, health.runtime_mode, "unavailable")).toLowerCase();
+  graphStatus.querySelector("small").textContent = ui.backend ? isRealDayMode() ? `${graphMode} · factual replay graph` : `${graphMode} · ${number(recoveryGraph.node_count, number(health.node_count, 0))} nodes` : "required to run";
   const modelStatus = $("model-status"); const llm = obj(health.llm); const modelConfigured = ui.backend && llm.enabled === true;
   modelStatus.className = `runtime-pill ${modelConfigured ? "configured" : "warn"}`;
   modelStatus.querySelector("strong").textContent = modelConfigured ? "Local Qwen" : ui.backend ? "Safe planner" : "Coordinator offline";
@@ -744,6 +1127,7 @@ async function loadDecisionStory(episodeId, { followLive = false } = {}) {
 }
 
 function renderAirports() {
+  if (isRealDayMode()) { renderBacktestMenu(); return; }
   const menu = $("airport-menu"); if (!menu) return;
   const active = String(ui.snapshot?.scenario?.airport || "").toUpperCase();
   menu.innerHTML = ui.airports.length ? ui.airports.map((airport) => `<button type="button" class="airport-option ${String(airport.code).toUpperCase() === active ? "active" : ""}" role="option" data-airport="${escapeHtml(String(airport.code).toUpperCase())}" aria-selected="${String(airport.code).toUpperCase() === active}"><i>${escapeHtml(airport.code)}</i><span><strong>${escapeHtml(first(airport.label, airport.name, airport.code))}</strong><small>${escapeHtml(first(airport.summary, "Bounded historical replay"))}</small></span><em>${String(airport.code).toUpperCase() === active ? "ACTIVE" : "OPEN"}</em></button>`).join("") : '<span class="log-empty">Airport catalog unavailable.</span>';
@@ -848,6 +1232,11 @@ function renderTab() {
 }
 
 function updatePrimaryAction() {
+  if (isRealDayMode()) {
+    const button = $("primary-action"); button.classList.remove("applied"); button.disabled = ui.backtests.busy || !ui.backend;
+    $("primary-action-label").textContent = ui.backtests.busy ? "Forecasting…" : backtestIsComplete() ? "View final score" : "Forecast + reveal next hour";
+    return;
+  }
   const button = $("primary-action"); const plan = ui.snapshot.current_plan; const status = String(plan?.status || "").toUpperCase(); button.classList.toggle("applied", status === "APPLIED");
   if (!ui.backend) { button.disabled = true; $("primary-action-label").textContent = "FalkorDB required"; return; }
   if (ui.busy) { button.disabled = true; $("primary-action-label").textContent = "Replanning…"; return; }
@@ -899,11 +1288,16 @@ function renderUnavailablePresentation() {
 
 function syncEngineAvailability() {
   const available = ui.backend;
+  const backtestBusy = isRealDayMode() && ui.backtests.busy;
+  const blocked = ui.busy || backtestBusy;
+  const realDayComplete = isRealDayMode() && backtestIsComplete();
   document.body.classList.toggle("engine-offline", !available);
   ui.map?.setEngineAvailable?.(available);
-  ["timeline", "jump-button", "reset-button", "auto-apply"].forEach((id) => { const control = $(id); if (control) control.disabled = !available || ui.busy; });
-  if ($("play-button")) $("play-button").disabled = !available;
-  document.querySelectorAll("[data-speed], .publish-policy-update").forEach((control) => { control.disabled = !available || ui.busy; });
+  ["timeline", "reset-button", "auto-apply"].forEach((id) => { const control = $(id); if (control) control.disabled = !available || blocked; });
+  if ($("jump-button")) $("jump-button").disabled = !available || blocked || realDayComplete;
+  if ($("play-button")) $("play-button").disabled = !available || blocked || realDayComplete;
+  document.querySelectorAll("[data-speed]").forEach((control) => { control.disabled = !available || blocked || realDayComplete; });
+  document.querySelectorAll(".publish-policy-update").forEach((control) => { control.disabled = !available || blocked; });
   document.querySelectorAll("[data-brain-question], #brain-question, #brain-submit").forEach((control) => { control.disabled = !available || ui.brainBusy; });
   const panel = $("engine-unavailable");
   if (panel) {
@@ -924,6 +1318,14 @@ function syncEngineAvailability() {
 function enterEngineUnavailable(error, { preserveSnapshot = false } = {}) {
   ui.playing = false; ui.busy = false; ui.backend = false; ui.health = {};
   ui.unavailableReason = first(error?.message, "FalkorDB is required to run GroundGraph.");
+  if (isRealDayMode()) {
+    const preserveBacktest = preserveSnapshot && Object.keys(obj(ui.backtests.active)).length > 0;
+    ui.source = preserveBacktest ? "api-frozen" : "unavailable";
+    renderRuntime();
+    if (preserveBacktest) renderRealDay();
+    syncEngineAvailability();
+    return;
+  }
   const preserveGenuine = preserveSnapshot && ["api", "api-frozen"].includes(ui.source) && ui.snapshot?.ok === true;
   ui.source = preserveGenuine ? "api-frozen" : "unavailable";
   renderSnapshot(preserveGenuine ? ui.snapshot : UNAVAILABLE_SNAPSHOT, { keepVisualTime: preserveGenuine });
@@ -973,29 +1375,43 @@ async function mutation(path, body) {
 }
 
 async function advance(minutes) {
+  if (isRealDayMode()) {
+    if (!ui.backend || !ui.playing || ui.backtests.busy || backtestIsComplete()) { if (backtestIsComplete()) setPlaying(false); return; }
+    ui.backtests.playProgress += Math.max(0, number(minutes, 1)) / 4;
+    const elapsedHours = Math.floor(ui.backtests.playProgress);
+    if (elapsedHours < 1) return;
+    ui.backtests.playProgress -= elapsedHours;
+    await tickBacktest(Math.min(24, elapsedHours)); return;
+  }
   if (!ui.backend || !ui.playing || ui.busy || ui.snapshot.clock.minute >= ui.snapshot.scenario.end_minute) { if (ui.snapshot?.clock?.minute >= ui.snapshot?.scenario?.end_minute) setPlaying(false); return; }
   await mutation("/api/replan/tick", { minutes: Math.max(1, Math.min(30, Math.round(minutes))) });
 }
 
 async function verifyRuntimeAvailability() {
-  if (ui.busy || ui.brainBusy || ui.healthChecking) return;
+  if (ui.busy || ui.backtests.busy || ui.brainBusy || ui.healthChecking) return;
   ui.healthChecking = true;
   try {
     const health = requireHealthyRuntime(await request("/api/health", { timeout: 5000 }));
+    if (isRealDayMode() && ui.backend) requireHealthyRuntime(await request("/api/backtests/health", { timeout: 15000 }));
     ui.healthFailures = 0;
     if (!ui.backend) {
       const snapshot = requireHealthySnapshot(await request("/api/snapshot", { timeout: 15000 }));
       ui.health = health; ui.backend = true; ui.source = "api"; ui.unavailableReason = "";
-      renderSnapshot(snapshot);
+      if (isRealDayMode()) {
+        ui.snapshot = normalizeSnapshot(snapshot);
+        if (!await loadBacktests({ refreshActive: true }) || !ui.backend) return;
+        requireHealthyRuntime(await request("/api/backtests/health", { timeout: 15000 }));
+      }
+      else renderSnapshot(snapshot);
       setPlaying(false);
-      showToast("FalkorDB restored — live replay reconnected");
+      if (ui.backend) showToast("FalkorDB restored — live replay reconnected");
     } else {
       ui.health = health;
       renderRuntime();
     }
   } catch (error) {
     ui.healthFailures += 1;
-    const explicitGraphOutage = number(error?.status) === 503 && error?.payload?.code === "GRAPH_UNAVAILABLE";
+    const explicitGraphOutage = number(error?.status) === 503 && ["GRAPH_UNAVAILABLE", "GRAPH_NOT_READY"].includes(error?.payload?.code);
     if (ui.backend && (explicitGraphOutage || ui.healthFailures >= 2)) {
       enterEngineUnavailable(error, { preserveSnapshot: true });
       showToast("Engine connection lost — replay frozen");
@@ -1049,6 +1465,7 @@ async function publishPolicyUpdate(policyId) {
   finally { setBusy(false); if (wasPlaying && ui.backend) setPlaying(true); }
 }
 async function resetReplay() {
+  if (isRealDayMode()) { const id = String(ui.backtests.selectedId || backtestRunId(ui.backtests.active)); if (id) await selectBacktest(id, { reset: true }); return; }
   ui.policyDemo = null; ui.selectedCycle = null; ui.selectedEpisode = null; ui.decisionStory = null; ui.followLive = true; setPlaying(false); setBusy(true, "Resetting replay state");
   if (!ui.backend) { setBusy(false); enterEngineUnavailable(new Error("FalkorDB is required to reset the replay.")); return; }
   try { const snapshot = requireHealthySnapshot(await request("/api/reset", { method: "POST", body: "{}" })); renderSnapshot(snapshot); setPlaying(false); showToast("Replay restarted and paused at 08:00"); }
@@ -1056,17 +1473,21 @@ async function resetReplay() {
 }
 
 function setPlaying(active) {
-  ui.playing = Boolean(active) && ui.backend && ui.snapshot.clock.minute < ui.snapshot.scenario.end_minute;
+  const canContinue = isRealDayMode() ? !backtestIsComplete() : ui.snapshot.clock.minute < ui.snapshot.scenario.end_minute;
+  const wasPlaying = ui.playing;
+  ui.playing = Boolean(active) && ui.backend && canContinue;
+  if (isRealDayMode() && ui.playing && !wasPlaying) ui.backtests.playProgress = 0;
   if (!ui.backend) {
     $("play-icon").textContent = "!"; $("play-label").textContent = "Unavailable";
     $("play-button").setAttribute("aria-pressed", "false");
     return;
   }
-  $("play-icon").textContent = ui.playing ? "Ⅱ" : "▶"; $("play-label").textContent = ui.playing ? "Pause" : "Play";
+  $("play-icon").textContent = ui.playing ? "Ⅱ" : isRealDayMode() && !canContinue ? "✓" : "▶"; $("play-label").textContent = ui.playing ? "Pause" : isRealDayMode() && !canContinue ? "Complete" : isRealDayMode() ? "Play day" : "Play";
   $("play-button").setAttribute("aria-pressed", String(ui.playing));
 }
 
 async function seek(target) {
+  if (isRealDayMode()) { await seekBacktest(target); return; }
   if (!ui.backend) { enterEngineUnavailable(new Error("FalkorDB is required to move the replay clock.")); return; }
   const minute = Math.max(ui.snapshot.scenario.start_minute, Math.min(ui.snapshot.scenario.end_minute, Math.round(number(target)))); setPlaying(false);
   if (minute < ui.snapshot.clock.minute) {
@@ -1080,6 +1501,11 @@ async function seek(target) {
 
 function animationFrame(timestamp) {
   const elapsed = ui.lastFrameAt ? Math.min(0.1, (timestamp - ui.lastFrameAt) / 1000) : 0; ui.lastFrameAt = timestamp;
+  if (isRealDayMode()) {
+    const gap = ui.backtests.targetHour - ui.backtests.visualHour; ui.backtests.visualHour += gap * Math.min(1, elapsed * 5.2); if (Math.abs(gap) < 0.01) ui.backtests.visualHour = ui.backtests.targetHour;
+    ui.map?.setTime(ui.backtests.visualHour * 60); $("replay-clock").textContent = `${String(Math.floor(ui.backtests.visualHour)).padStart(2, "0")}:${String(Math.round((ui.backtests.visualHour % 1) * 60)).padStart(2, "0")}`; if (!ui.scrubbing) $("timeline").value = String(ui.backtests.visualHour);
+    ui.frame = requestAnimationFrame(animationFrame); return;
+  }
   if (ui.backend || ui.source === "api-frozen") {
     const gap = ui.targetMinute - ui.visualMinute; ui.visualMinute += gap * Math.min(1, elapsed * 5.2); if (Math.abs(gap) < 0.02) ui.visualMinute = ui.targetMinute;
     ui.map?.setTime(ui.visualMinute); $("replay-clock").textContent = formatClock(ui.visualMinute); if (!ui.scrubbing) $("timeline").value = String(ui.visualMinute);
@@ -1091,15 +1517,20 @@ function animationFrame(timestamp) {
 
 function bindInteractions() {
   $("play-button").addEventListener("click", () => setPlaying(!ui.playing));
+  document.querySelectorAll("#mode-switch [data-mode]").forEach((button) => button.addEventListener("click", () => switchMode(button.dataset.mode)));
   document.querySelectorAll("[data-speed]").forEach((button) => button.addEventListener("click", () => {
     ui.speed = number(button.dataset.speed, 4); document.querySelectorAll("[data-speed]").forEach((item) => { const active = item === button; item.classList.toggle("active", active); item.setAttribute("aria-pressed", String(active)); }); showToast(`Replay speed ${ui.speed}×`);
   }));
   $("timeline").addEventListener("pointerdown", () => { ui.scrubbing = true; });
-  $("timeline").addEventListener("input", (event) => { ui.visualMinute = number(event.target.value); $("replay-clock").textContent = formatClock(ui.visualMinute); ui.map?.setTime(ui.visualMinute); });
+  $("timeline").addEventListener("input", (event) => {
+    if (isRealDayMode()) { ui.backtests.visualHour = number(event.target.value); $("replay-clock").textContent = `${String(Math.floor(ui.backtests.visualHour)).padStart(2, "0")}:00`; ui.map?.setTime(ui.backtests.visualHour * 60); }
+    else { ui.visualMinute = number(event.target.value); $("replay-clock").textContent = formatClock(ui.visualMinute); ui.map?.setTime(ui.visualMinute); }
+  });
   $("timeline").addEventListener("change", async (event) => { ui.scrubbing = false; await seek(event.target.value); });
-  $("jump-button").addEventListener("click", async () => { const bag = ui.snapshot.events.find((event) => String(event.type).includes("BAG")); await seek(number(bag?.at_minute, 36)); });
+  $("jump-button").addEventListener("click", async () => { if (isRealDayMode()) await tickBacktest(1); else { const bag = ui.snapshot.events.find((event) => String(event.type).includes("BAG")); await seek(number(bag?.at_minute, 36)); } });
   $("reset-button").addEventListener("click", resetReplay);
   $("primary-action").addEventListener("click", () => {
+    if (isRealDayMode()) { if (backtestIsComplete()) { ui.realStoryPhase = "score"; setRealDayPhase("score"); } else tickBacktest(1); return; }
     const plan = ui.snapshot.current_plan; const status = String(plan?.status || "").toUpperCase();
     if (plan && status === "PROPOSED") applyPlan(); else if (plan && status === "APPLIED") { ui.selectedTab = "cycles"; renderTab(); } else runReplan();
   });
@@ -1107,15 +1538,15 @@ function bindInteractions() {
   document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => { ui.selectedTab = button.dataset.tab; renderTab(); }));
   $("proof-close").addEventListener("click", () => { ui.selectedTab = null; renderTab(); });
   $("airport-switcher").addEventListener("click", (event) => { event.stopPropagation(); ui.airportMenuOpen = !ui.airportMenuOpen; renderAirports(); });
-  $("airport-menu").addEventListener("click", (event) => { const option = event.target.closest("[data-airport]"); if (option) selectAirport(option.dataset.airport); });
+  $("airport-menu").addEventListener("click", (event) => { const run = event.target.closest("[data-backtest]"); if (run) { selectBacktest(run.dataset.backtest); return; } const option = event.target.closest("[data-airport]"); if (option) selectAirport(option.dataset.airport); });
   $("decision-log").addEventListener("click", (event) => {
     const row = event.target.closest("[data-episode]"); if (!row) return;
     const latest = historyEpisodeId(list(ui.snapshot.replanning?.history)[0]);
     loadDecisionStory(row.dataset.episode, { followLive: String(row.dataset.episode) === String(latest) });
   });
   $("stage-rail").addEventListener("click", (event) => {
-    const step = event.target.closest("[data-phase]"); if (!step) return;
-    setStoryPhase(step.dataset.phase);
+    const realStep = event.target.closest("[data-real-phase]"); if (realStep) { setRealDayPhase(realStep.dataset.realPhase); return; }
+    const step = event.target.closest("[data-phase]"); if (!step) return; setStoryPhase(step.dataset.phase);
   });
   $("causal-path").addEventListener("click", (event) => { const node = event.target.closest(".causal-node"); if (!node) return; document.querySelectorAll(".causal-node").forEach((item) => item.classList.toggle("active", item === node)); $("causal-caption").textContent = node.dataset.detail; ui.map?.setSelectedFlight(node.dataset.node); });
   $("cycles-stage").addEventListener("click", (event) => { const row = event.target.closest(".cycle-row"); if (!row) return; ui.selectedCycle = first(row.dataset.episode, row.dataset.cycle); renderReplanning(); const item = list(ui.snapshot.replanning.history).find((entry) => String(first(entry.episode_id, entry.id, entry.plan_id, entry.cycle)) === String(ui.selectedCycle)); if (item) { $("causal-caption").textContent = `Cycle ${item.cycle} · ${shortStatus(item.status)} · ${item.summary}`; loadDecisionStory(historyEpisodeId(item), { followLive: false }); } });

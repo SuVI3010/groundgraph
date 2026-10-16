@@ -32,6 +32,7 @@
 - [x] Applied-episode reset restores the full episode-plan-action-outcome-memory lineage, action evidence relationships, and the same six unique consumed `AgentRun → Finding → Handoff` chains.
 - [x] Context matching prevents a baggage episode from influencing an unrelated weather decision.
 - [x] Six specialist handoffs record domain query names, evidence IDs, the shared input version, start/end timestamps, duration, and consumed status.
+- [x] The factual ORD shadow test uses a reproducible public data pack, excludes future and already-known target labels, performs evaluator-only end-of-day archive settlement, and compares saved forecasts with a declared baseline.
 - [x] Causal-path API edges are persisted relationships with graph-precondition failure tests.
 - [x] Server autonomy can be disabled for a pending supervised proposal and re-enabled for guarded auto-application.
 - [x] Operations Brain routes ownership, incident, current-policy, supersession, and unsupported questions to distinct graph-backed responses.

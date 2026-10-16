@@ -8,12 +8,13 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from flask import Flask, jsonify, request, send_from_directory
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from backtest import DEFAULT_BACKTEST_ROOT, HistoricalBacktestRuntime, discover_backtests
 from decision_story import build_decision_story
 from engine import GraphNotReadyError, GroundGraphEngine
 
@@ -111,6 +112,8 @@ def create_app(
     *,
     registry_path: Path | str | None = None,
     scenario_engine_factory: Any | None = None,
+    backtest_root: Path | str | None = None,
+    backtest_runtime_factory: Any | None = None,
 ) -> Flask:
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["JSON_SORT_KEYS"] = False
@@ -133,6 +136,15 @@ def create_app(
         "engines": ({initial_id: engine} if engine is not None else {}),
         "active_scenario_id": initial_id,
         "registry": registry,
+    }
+    selected_backtest_root = Path(
+        backtest_root
+        or os.getenv("GROUNDGRAPH_BACKTEST_ROOT", str(DEFAULT_BACKTEST_ROOT))
+    ).resolve()
+    backtest_holder: dict[str, Any] = {
+        "active_backtest_id": None,
+        "runtimes": {},
+        "root": str(selected_backtest_root),
     }
     init_lock = threading.RLock()
 
@@ -176,10 +188,13 @@ def create_app(
         )
 
     def unavailable_payload(
-        exc: Exception, *, code: str = "GRAPH_UNAVAILABLE"
+        exc: Exception,
+        *,
+        code: str = "GRAPH_UNAVAILABLE",
+        runtime_mode: str | None = None,
     ) -> dict[str, Any]:
         active_engine = holder["engine"]
-        runtime_mode = (
+        selected_runtime_mode = runtime_mode or (
             active_engine.backend.mode
             if active_engine is not None
             else os.getenv("FALKORDB_MODE", "server")
@@ -188,13 +203,25 @@ def create_app(
             "ok": False,
             "status": "unavailable",
             "code": code,
-            "runtime_mode": runtime_mode,
+            "runtime_mode": selected_runtime_mode,
             "error": str(exc),
             "detail": (
                 "FalkorDB is unavailable; operational reads, replanning, and "
                 "mutations are disabled until the graph server is restored."
             ),
         }
+
+    def backtest_unavailable_payload(exc: Exception) -> dict[str, Any]:
+        active_id = backtest_holder.get("active_backtest_id")
+        runtime = backtest_holder["runtimes"].get(str(active_id))
+        mode = runtime.backend.mode if runtime is not None else os.getenv(
+            "FALKORDB_MODE", "server"
+        )
+        return unavailable_payload(
+            exc,
+            code="GRAPH_NOT_READY",
+            runtime_mode=mode,
+        )
 
     def get_engine() -> GroundGraphEngine:
         active_id = str(holder["active_scenario_id"])
@@ -219,6 +246,51 @@ def create_app(
             holder["active_scenario_id"] = scenario_id
             holder["engine"] = selected
             return selected
+
+    def backtest_registry() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        entries = discover_backtests(selected_backtest_root)
+        return entries, {str(item["id"]): item for item in entries}
+
+    def public_backtest_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in entry.items() if key != "resolved_path"}
+
+    def activate_backtest(backtest_id: str) -> HistoricalBacktestRuntime:
+        entries, by_id = backtest_registry()
+        del entries
+        if backtest_id not in by_id:
+            raise KeyError(backtest_id)
+        with init_lock:
+            runtime = backtest_holder["runtimes"].get(backtest_id)
+            if runtime is None:
+                entry = by_id[backtest_id]
+                if backtest_runtime_factory is not None:
+                    runtime = backtest_runtime_factory(dict(entry))
+                else:
+                    mode = os.getenv("FALKORDB_MODE", "server").strip().lower()
+                    graph_name = "groundgraph_backtest_" + re.sub(
+                        r"[^A-Za-z0-9_]", "_", backtest_id.lower()
+                    ).strip("_")
+                    lite_path: Path | str | None = None
+                    if mode == "lite":
+                        lite_path = BASE_DIR / ".data" / f"{graph_name}.db"
+                    runtime = HistoricalBacktestRuntime(
+                        entry["resolved_path"],
+                        mode=mode,
+                        graph_name=graph_name,
+                        lite_path=lite_path,
+                    )
+                backtest_holder["runtimes"][backtest_id] = runtime
+            backtest_holder["active_backtest_id"] = backtest_id
+            return runtime
+
+    def get_backtest() -> HistoricalBacktestRuntime:
+        active_id = backtest_holder.get("active_backtest_id")
+        if not active_id:
+            raise RuntimeError("No backtest is selected; choose one returned by /api/backtests")
+        runtime = backtest_holder["runtimes"].get(str(active_id))
+        if runtime is None:
+            raise RuntimeError("The selected backtest runtime is unavailable")
+        return runtime
 
     @app.errorhandler(RedisConnectionError)
     @app.errorhandler(RedisTimeoutError)
@@ -295,6 +367,103 @@ def create_app(
                 ],
             }
         )
+
+    @app.get("/api/backtests")
+    def backtests():
+        entries, _by_id = backtest_registry()
+        active_id = backtest_holder.get("active_backtest_id")
+        return jsonify(
+            {
+                "ok": True,
+                "active_backtest_id": active_id,
+                "backtests": [
+                    {
+                        **public_backtest_entry(entry),
+                        "active": str(entry["id"]) == str(active_id),
+                        "loaded": str(entry["id"]) in backtest_holder["runtimes"],
+                    }
+                    for entry in entries
+                ],
+            }
+        )
+
+    @app.post("/api/backtests/select")
+    def select_backtest():
+        body: dict[str, Any] = request.get_json(silent=True) or {}
+        backtest_id = str(body.get("backtest_id", body.get("id", ""))).strip()
+        _entries, by_id = backtest_registry()
+        if backtest_id not in by_id:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Unknown backtest_id; choose one returned by /api/backtests",
+                }
+            ), 404
+        try:
+            # Selection, reset, ticking, and result reads share this lock so a
+            # reset cannot close FalkorDB while another request is using it.
+            with init_lock:
+                if body.get("reset") is True:
+                    prior = backtest_holder["runtimes"].pop(backtest_id, None)
+                    if prior is not None:
+                        prior.close()
+                runtime = activate_backtest(backtest_id)
+                return jsonify(
+                    {
+                        "ok": True,
+                        "selected": public_backtest_entry(by_id[backtest_id]),
+                        "snapshot": runtime.snapshot(),
+                    }
+                )
+        except GraphNotReadyError as exc:
+            return jsonify(backtest_unavailable_payload(exc)), 503
+        except (FileNotFoundError, TypeError, ValueError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+
+    @app.get("/api/backtests/health")
+    def backtest_health():
+        try:
+            with init_lock:
+                return jsonify(get_backtest().health())
+        except GraphNotReadyError as exc:
+            return jsonify(backtest_unavailable_payload(exc)), 503
+        except (FileNotFoundError, TypeError, ValueError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+
+    @app.post("/api/backtests/tick")
+    def tick_backtest():
+        body: dict[str, Any] = request.get_json(silent=True) or {}
+        try:
+            with init_lock:
+                return jsonify(
+                    get_backtest().tick(
+                        minutes=int(body.get("minutes", 60)),
+                        hours=(
+                            float(body["hours"])
+                            if body.get("hours") is not None
+                            else None
+                        ),
+                        to_minute=(
+                            int(body["to_minute"])
+                            if body.get("to_minute") is not None
+                            else None
+                        ),
+                    )
+                )
+        except GraphNotReadyError as exc:
+            return jsonify(backtest_unavailable_payload(exc)), 503
+        except (FileNotFoundError, TypeError, ValueError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+
+    @app.get("/api/backtests/results")
+    def backtest_results():
+        try:
+            with init_lock:
+                return jsonify(get_backtest().results())
+        except GraphNotReadyError as exc:
+            return jsonify(backtest_unavailable_payload(exc)), 503
+        except (FileNotFoundError, TypeError, ValueError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
 
     @app.post("/api/scenarios/select")
     def select_scenario():
@@ -438,6 +607,7 @@ def create_app(
             return jsonify({"ok": False, "error": str(exc)}), 409
 
     app.extensions["groundgraph_engine"] = holder
+    app.extensions["groundgraph_backtests"] = backtest_holder
     return app
 
 

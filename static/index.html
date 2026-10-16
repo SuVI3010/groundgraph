@@ -28,12 +28,17 @@
             </button>
             <div class="airport-menu" id="airport-menu" role="listbox" hidden></div>
           </div>
+          <div class="mode-switch" id="mode-switch" role="tablist" aria-label="GroundGraph experience">
+            <button type="button" class="active" data-mode="recovery" role="tab" aria-selected="true">Recovery demo</button>
+            <button type="button" data-mode="real-day" role="tab" aria-selected="false">Real-day test</button>
+          </div>
           <i></i>
           <span class="replay-window"><strong id="window-label">08:00–12:00 CT</strong><small>historical replay sandbox</small></span>
         </div>
 
         <div class="system-status" aria-label="Runtime status">
           <span class="truth-badge" id="truth-badge">CONNECTING</span>
+          <span class="truth-badge sealed-label real-day-only" id="sealed-label" hidden>FUTURE OUTCOMES SEALED</span>
           <span class="runtime-pill" id="model-status"><i></i><span><strong>Local model</strong><small>checking</small></span></span>
           <span class="runtime-pill" id="graph-status"><i></i><span><strong>FalkorDB</strong><small>checking</small></span></span>
           <button class="icon-button" id="reset-button" type="button" title="Restart this replay" aria-label="Restart this replay">
@@ -48,19 +53,19 @@
           <span><small><span id="incident-kicker">WATCHING OPERATIONS</span><em class="provenance-tag mixed" id="incident-provenance">MIXED</em></small><strong id="incident-title">Waiting for the replay</strong><span id="incident-detail">GroundGraph will explain why it acts when connected state changes.</span></span>
         </article>
         <div class="metric-row" aria-label="Decision result">
-          <article><small>Downstream delay</small><strong><span id="delay-before">—</span><i>→</i><span class="projection" id="delay-after">—</span></strong><em id="delay-delta">waiting for a decision</em></article>
-          <article><small>Flights in impact path</small><strong><span id="flights-before">—</span><i>→</i><span class="projection" id="flights-after">—</span></strong><em id="flights-delta">graph-derived</em></article>
+          <article><small id="delay-label">Downstream delay</small><strong><span id="delay-before">—</span><i>→</i><span class="projection" id="delay-after">—</span></strong><em id="delay-delta">waiting for a decision</em></article>
+          <article><small id="flights-label">Flights in impact path</small><strong><span id="flights-before">—</span><i>→</i><span class="projection" id="flights-after">—</span></strong><em id="flights-delta">graph-derived</em></article>
           <article class="gate-metric" hidden><small>Gate waiting</small><strong><span id="gate-before">—</span><i>→</i><span class="projection" id="gate-after">—</span></strong><em id="gate-delta">modeled where unavailable</em></article>
-          <article class="checks-metric"><small>Execution guard</small><strong id="checks-value">WATCHING</strong><em id="checks-detail">seven checks before apply</em></article>
+          <article class="checks-metric"><small id="checks-label">Execution guard</small><strong id="checks-value">WATCHING</strong><em id="checks-detail">seven checks before apply</em></article>
         </div>
       </section>
 
       <main class="cockpit-grid">
         <section class="surface-card panel" aria-label="Top-down airport operations replay">
           <header class="surface-header">
-            <div class="title-stack"><span class="eyebrow live"><i></i> OPERATIONS REPLAY</span><h1 id="surface-title">Airport surface &amp; connected flights</h1></div>
-            <div class="weather-summary" id="weather-summary"><span class="weather-icon" aria-hidden="true">◌</span><span><strong id="weather-primary">Loading weather…</strong><small id="weather-secondary">Only observations available by replay time</small></span><em class="provenance-tag observed">OBSERVED</em></div>
-            <div class="replay-clock"><small>REPLAY TIME</small><strong id="replay-clock">08:00</strong><span id="clock-zone">CT</span></div>
+            <div class="title-stack"><span class="eyebrow live"><i></i> <b id="surface-kicker">OPERATIONS REPLAY</b></span><h1 id="surface-title">Airport surface &amp; connected flights</h1></div>
+            <div class="weather-summary" id="weather-summary"><span class="weather-icon" aria-hidden="true">◌</span><span><strong id="weather-primary">Loading weather…</strong><small id="weather-secondary">Only observations available by replay time</small></span><em class="provenance-tag observed" id="weather-provenance">OBSERVED</em></div>
+            <div class="replay-clock"><small id="clock-label">REPLAY TIME</small><strong id="replay-clock">08:00</strong><span id="clock-zone">CT</span></div>
           </header>
           <div class="airport-view" id="airport-view">
             <canvas id="airport-canvas" aria-label="Animated top-down airport operations replay"></canvas>
@@ -71,7 +76,7 @@
               <span class="map-chip risk"><i class="amber"></i><b id="risk-count">0</b> at risk</span>
               <span class="map-chip protected"><i class="green"></i><b id="protected-count">0</b> protected</span>
             </div>
-            <div class="map-watermark"><strong>MODELED OPERATIONS SANDBOX</strong><span>Historical inputs · no live airport control</span></div>
+            <div class="map-watermark" id="map-watermark"><strong>MODELED OPERATIONS SANDBOX</strong><span>Historical inputs · no live airport control</span></div>
             <section class="engine-unavailable" id="engine-unavailable" hidden role="status" aria-live="polite"><span class="engine-unavailable-icon">!</span><span><small>SAFE READ-ONLY STATE</small><strong id="engine-unavailable-title">Planning engine unavailable</strong><p id="engine-unavailable-copy">GroundGraph requires its API and FalkorDB.</p></span></section>
             <article class="event-callout" id="event-callout"><time id="event-time">08:00</time><span class="event-symbol" id="event-symbol">↗</span><span><strong id="event-title">Historical demand is entering the graph</strong><small id="event-detail">A visible event will start a decision story.</small></span><em class="provenance-tag mixed" id="event-provenance">MIXED</em></article>
           </div>
@@ -85,8 +90,8 @@
 
         <aside class="decision-story-card panel" aria-label="Decision story">
           <header class="story-header">
-            <span><small class="eyebrow autonomy"><i></i> DECISION STORY</small><strong id="story-headline">GroundGraph is watching the connected operation</strong><em id="story-subtitle">No intervention is needed yet.</em></span>
-            <span class="decision-number"><small>DECISION</small><strong id="cycle-number">00</strong></span>
+            <span><small class="eyebrow autonomy"><i></i> <b id="story-kicker">DECISION STORY</b></small><strong id="story-headline">GroundGraph is watching the connected operation</strong><em id="story-subtitle">No intervention is needed yet.</em></span>
+            <span class="decision-number"><small id="cycle-label">DECISION</small><strong id="cycle-number">00</strong></span>
           </header>
           <div class="story-progress" id="stage-rail" aria-label="Decision progress">
             <span data-phase="trigger"><i>1</i><b>Detected</b></span><span data-phase="findings"><i>2</i><b>Read graph</b></span><span data-phase="options"><i>3</i><b>Compared</b></span><span data-phase="choice"><i>4</i><b>Qwen</b></span><span data-phase="guards"><i>5</i><b>Verified</b></span><span data-phase="outcome"><i>6</i><b>Result</b></span><span data-phase="next"><i>7</i><b>Watching</b></span>
@@ -116,9 +121,37 @@
 
             <section class="story-section story-next" id="next-check" data-story-order="7"><header><span class="story-step cyan">7</span><span><small>WHAT HAPPENS NEXT?</small><strong id="story-next-title">Continuous monitoring is active</strong></span><time id="story-next-time">+5 min</time></header><p id="story-next-copy">GroundGraph checks on schedule and replans sooner when connected state changes.</p></section>
           </div>
+          <div class="story-scroll real-day-story real-day-only" id="real-day-story" hidden aria-live="polite">
+            <section class="story-section story-active" id="real-known" data-real-phase="known">
+              <header><span class="story-step cyan">1</span><span><small>WHAT WAS KNOWN</small><strong id="real-known-title">Observed inputs available at this hour</strong></span><time id="real-known-time">00:00</time></header>
+              <p id="real-known-copy">Weather and traffic records are released in time order. Future outcomes stay hidden.</p>
+              <div class="real-fact-grid" id="real-known-facts"></div>
+            </section>
+            <section class="story-section" id="real-forecast" data-real-phase="forecast">
+              <header><span class="story-step violet">2</span><span><small>AGENT FORECAST</small><strong id="real-forecast-title">Waiting for the first bounded forecast</strong></span><em id="real-forecast-status">MODEL OUTPUT</em></header>
+              <p id="real-forecast-copy">The agents receive only observations available by the replay clock.</p>
+              <div class="real-fact-grid" id="real-forecast-facts"></div>
+              <div class="real-decision-explain" id="real-decision-explain" hidden>
+                <div class="real-choice-reason"><small>MODEL CHOICE + ASSUMPTION</small><strong id="real-choice-title">Waiting for a model choice</strong><p id="real-choice-copy"></p></div>
+                <div class="real-candidate-list" id="real-candidates" aria-label="Forecasts compared by the coordinator"></div>
+                <details class="real-agent-evidence"><summary id="real-agent-summary">Six graph agents reported to the coordinator</summary><div id="real-agent-handoffs"></div></details>
+              </div>
+            </section>
+            <section class="story-section" id="real-truth" data-real-phase="truth">
+              <header><span class="story-step amber">3</span><span><small>GROUND TRUTH REVEAL</small><strong id="real-truth-title">The next outcome is still sealed</strong></span><em id="real-truth-status">SEALED</em></header>
+              <p id="real-truth-copy">Advance the replay to reveal what actually happened after the forecast was recorded.</p>
+              <div class="real-fact-grid" id="real-truth-facts"></div>
+            </section>
+            <section class="story-section" id="real-score" data-real-phase="score">
+              <header><span class="story-step green">4</span><span><small>SCORE VS BASELINE</small><strong id="real-score-title">Scoring opens after ground truth</strong></span><em id="real-score-status">WAITING</em></header>
+              <p id="real-score-copy">GroundGraph is compared with the declared baseline on the same revealed hours.</p>
+              <div class="real-scoreboard" id="real-scoreboard"></div>
+            </section>
+          </div>
           <footer class="story-footer">
             <div class="replan-radar" id="replan-radar"><span class="radar-ring"><i></i></span><span><small>CONTINUOUS REPLANNING</small><strong id="replan-state">Monitoring connected state</strong><em id="replan-next">Next scan in 5 replay min</em></span></div>
             <label class="autonomy-toggle"><input id="auto-apply" type="checkbox" checked /><span></span><strong>Auto-apply <em id="auto-apply-state">ON</em></strong></label>
+            <p class="real-day-disclaimer real-day-only" hidden>Forecasts are model outputs; no saved-minutes claim</p>
             <button class="primary-action" id="primary-action" type="button"><span id="primary-action-label">Run decision check</span><b>→</b></button>
           </footer>
         </aside>
