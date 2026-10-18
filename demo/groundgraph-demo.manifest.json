@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-10-18T15:37:30.269Z",
+  "created_at": "2026-10-18T16:11:16.384Z",
   "source_url": "http://127.0.0.1:5050/",
   "viewport": "1440x900",
   "visual_treatment": {
@@ -108,8 +108,8 @@
   },
   "semantic_proof": {
     "applied": {
-      "episode_id": "EPISODE-8-1792337679296874000",
-      "plan_id": "PLAN-8-1792337679296874000-TURNAROUND_RECOVERY",
+      "episode_id": "EPISODE-8-1792339702670734000",
+      "plan_id": "PLAN-8-1792339702670734000-TURNAROUND_RECOVERY",
       "graph_version": 2,
       "findings": 6,
       "allowlisted_candidates": 3,
@@ -117,7 +117,7 @@
       "recovered_minutes": 12
     },
     "no_action": {
-      "episode_id": "EPISODE-9-1792337752050232000",
+      "episode_id": "EPISODE-9-1792339775218467000",
       "cycle": 9,
       "result_kind": "NO_ACTION",
       "reason": "No connected delay exceeded the four-minute benefit threshold, so changing operations would add work without enough recovery.",
@@ -156,7 +156,7 @@
       "narration": "An airport delay rarely stays one delay. A late bag can hold a departure, block a gate, and affect the next flight. I'm Viswesh Suri, and together with Sai Pranav, I built GroundGraph to see that chain and help teams respond before it spreads.",
       "audio_duration_seconds": 17.132375,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 17.533
+      "visual_duration_seconds": 17.534
     },
     {
       "id": "why-now",
@@ -164,7 +164,7 @@
       "narration": "This is O'Hare in replay. Flights, gates, ground tasks, policies, and earlier decisions are connected in FalkorDB. At eight thirty-six, a baggage turnaround slips, putting a departure and its rotation at risk.",
       "audio_duration_seconds": 18.283063,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 18.684
+      "visual_duration_seconds": 18.683
     },
     {
       "id": "findings",
@@ -172,7 +172,7 @@
       "narration": "Six agents check the same graph version: weather, flow, gates, turnaround, policy, and memory. Their findings and handoffs are saved in FalkorDB, so we can see what each knew and what the coordinator actually used.",
       "audio_duration_seconds": 17.867146,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 18.268
+      "visual_duration_seconds": 18.269
     },
     {
       "id": "options",
@@ -188,7 +188,7 @@
       "narration": "The model still cannot execute. Seven checks re-read resources, policy, timing, benefit, and graph state. Only after they pass does GroundGraph write the actions and modeled outcome to FalkorDB. Thirty minutes becomes eighteen under the replay assumptions.",
       "audio_duration_seconds": 20.190854,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 20.591
+      "visual_duration_seconds": 20.592
     },
     {
       "id": "restraint",
@@ -196,7 +196,7 @@
       "narration": "At the next checkpoint, the agents read again. The remaining benefit is below the safety threshold, so GroundGraph deliberately does nothing. Continuous replanning also means knowing when an intervention would create more churn than value.",
       "audio_duration_seconds": 16.643125,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 17.043
+      "visual_duration_seconds": 17.044
     },
     {
       "id": "memory-knowledge",
@@ -204,7 +204,7 @@
       "narration": "The outcome becomes memory tied to the event, rotation, resources, and policy. It can influence a later plan only when that context matches. If an operator asks who owns this recovery, Company Brain follows the graph from policy to procedure, team, role, and source evidence.",
       "audio_duration_seconds": 20.472333,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 20.872
+      "visual_duration_seconds": 20.874
     },
     {
       "id": "airports",
@@ -212,7 +212,7 @@
       "narration": "The same decision contract also runs on separate Atlanta and San Francisco graphs.",
       "audio_duration_seconds": 6.055729,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 6.458
+      "visual_duration_seconds": 7.139
     },
     {
       "id": "close",
@@ -220,30 +220,30 @@
       "narration": "FalkorDB is GroundGraph’s shared brain. It connects airport state, agent handoffs, memory, and evidence across all three tracks. We replayed thirty days at O’Hare, hour by hour, giving the forecast only the information available at that moment. Average prediction error fell from about thirty-five minutes using the schedule alone to nineteen with GroundGraph. It shows the full loop. Understand the disruption. Coordinate a safe response. Explain it and learn. That’s GroundGraph.",
       "audio_duration_seconds": 38.581083,
       "narration_lead_seconds": 0.12,
-      "visual_duration_seconds": 38.981
+      "visual_duration_seconds": 38.983
     }
   ],
   "output": "demo/groundgraph-demo.mp4",
-  "duration_seconds": 178.7,
-  "sha256": "b2aff49c939762f10621888cbcd074776022243f613a4fc559b03262d33941ed",
-  "frame_count": 5360,
-  "edited_at": "2026-10-18T15:37:58.359563+00:00",
-  "source_commit": "b9b9f1579662d52d91d7c8edb09d14b1c42bcc55",
+  "duration_seconds": 179.3,
+  "sha256": "c2f67cc051c7d7e83ee5f9d6cf8dfc61a0f105f5759a6bfff3ebed70c018f4e6",
+  "frame_count": 5379,
+  "edited_at": "2026-10-18T16:12:17.924567+00:00",
+  "source_commit": "910e8a03d798b96507c5a60362f6f3ce787f48af",
   "source_candidate": "demo/groundgraph-founder-screen-candidate.mp4",
-  "source_candidate_sha256": "bdc545d85eebb440a5577d2cd2bf44b05b8a898c3fd1d827caf773c7985bd7d8",
+  "source_candidate_sha256": "fa8418e6e5cdab711c8e8065366779bbf9f0dc5349336be384175d6028c3bd41",
   "source_manifest": "demo/groundgraph-founder-screen-candidate.manifest.json",
   "founder_media": {
     "opening": "demo/1.mov",
     "closing": "demo/8.mov",
     "source_policy": "local untracked founder recordings; final edit is the published artifact",
     "face_to_product_seconds": 3.8,
-    "product_to_face_seconds": 167.675,
-    "close_scene_start_seconds": 139.628
+    "product_to_face_seconds": 168.361,
+    "close_scene_start_seconds": 140.314
   },
   "cover": "demo/groundgraph-demo-cover.jpg",
-  "cover_sha256": "0333fa2c6f0a6a1b28c86e41c293e2fd0e347d4040f433ddb6c07b8c2f0ec28e",
-  "audio_stream_sha256": "f0885a5b488d0f185fae6d776f9b5550a0eb373e51e1c7aeef94f26d6c94f3ec",
-  "source_audio_stream_sha256": "f0885a5b488d0f185fae6d776f9b5550a0eb373e51e1c7aeef94f26d6c94f3ec",
+  "cover_sha256": "8e2ba62bc7100289c6d2f693bdbf3d3ddaf384a14191f98ec4cd2868db965ae1",
+  "audio_stream_sha256": "c10efefe928241d73ebc43f10e49cbbef0aec6368414373acc7e865ba6e75dbc",
+  "source_audio_stream_sha256": "c10efefe928241d73ebc43f10e49cbbef0aec6368414373acc7e865ba6e75dbc",
   "media_qa": {
     "full_decode": "passed",
     "black_segments_detected": 0,
@@ -257,9 +257,9 @@
       "sample_rate_hz": 48000,
       "channels": 2,
       "mean_volume_db": -18.7,
-      "max_volume_db": -4.2,
+      "max_volume_db": -4.0,
       "integrated_lufs": -16.0,
-      "true_peak_dbfs": -4.2
+      "true_peak_dbfs": -3.9
     },
     "silence_review": {
       "threshold_db": -45,
