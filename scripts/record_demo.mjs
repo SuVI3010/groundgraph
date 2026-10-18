@@ -27,11 +27,11 @@ const FOUNDER_SYNC = Object.freeze({
     cues: { disruption: 9.72 },
   },
   findings: {
-    referenceDuration: 17.699,
-    captionStarts: [0, 9.07],
+    referenceDuration: 17.867,
+    captionStarts: [0, 9.43],
     cues: {
-      weather: 3.24, flow: 4.10, gate: 4.92, turn: 5.80, policy: 6.86, memory: 8.03,
-      handoffs: 9.07, falkordb: 12.10, coordinator: 13.05,
+      weather: 3.75, flow: 4.62, gate: 5.51, turn: 6.50, policy: 7.27, memory: 8.04,
+      handoffs: 9.43, falkordb: 11.51, coordinator: 16.01,
     },
   },
   options: {
@@ -50,9 +50,9 @@ const FOUNDER_SYNC = Object.freeze({
     cues: { threshold: 3.80, noAction: 7.06, continuous: 10.35 },
   },
   "memory-knowledge": {
-    referenceDuration: 19.575,
-    captionStarts: [0, 6.38, 10.23],
-    cues: { contextMatch: 6.38, operatorAsks: 10.23, companyBrain: 12.66, evidence: 14.34 },
+    referenceDuration: 20.472,
+    captionStarts: [0, 6.74, 10.78],
+    cues: { contextMatch: 6.74, operatorAsks: 10.78, companyBrain: 14.09, evidence: 19.53 },
   },
   airports: {
     referenceDuration: 6.055,
@@ -380,7 +380,7 @@ async function injectDemoOverlay(page) {
       #demo-recorder-scene i { width:7px; height:7px; border-radius:50%; background:#45d8ff; box-shadow:0 0 11px #45d8ff; }
       #demo-recorder-scene small { color:#75edbd; font:850 9px/1 ui-monospace,SFMono-Regular,monospace; letter-spacing:.11em; }
       #demo-recorder-focus { position:fixed; z-index:9002; display:block; border:2px solid rgba(69,216,255,.82); border-radius:15px; box-shadow:0 0 0 9999px rgba(1,8,15,.48),0 0 35px rgba(69,216,255,.22); opacity:0; transition:left .45s,top .45s,width .45s,height .45s,opacity .25s; pointer-events:none; }
-      #demo-recorder-caption { position:fixed; z-index:9006; left:50%; bottom:24px; width:min(1080px,calc(100vw - 80px)); min-height:58px; display:grid; place-items:center; padding:10px 22px; border:1px solid rgba(166,226,244,.34); border-radius:13px; color:#fff; background:rgba(2,10,17,.94); box-shadow:0 14px 38px rgba(0,0,0,.58); opacity:0; transform:translate(-50%,8px); transition:opacity .18s,transform .18s; pointer-events:none; text-align:center; font:750 21px/1.34 ui-sans-serif,system-ui,sans-serif; letter-spacing:.005em; text-wrap:balance; }
+      #demo-recorder-caption { position:fixed; z-index:9006; left:50%; bottom:16px; width:min(920px,calc(100vw - 120px)); min-height:50px; display:grid; place-items:center; padding:8px 19px; border:1px solid rgba(166,226,244,.30); border-radius:12px; color:#fff; background:rgba(2,10,17,.95); box-shadow:0 12px 30px rgba(0,0,0,.52); opacity:0; transform:translate(-50%,8px); transition:opacity .18s,transform .18s; pointer-events:none; text-align:center; font:750 18px/1.32 ui-sans-serif,system-ui,sans-serif; letter-spacing:.005em; text-wrap:balance; }
       #demo-recorder-caption.visible { opacity:1; transform:translate(-50%,0); }
     `;
     document.head.append(style);
@@ -433,13 +433,36 @@ async function captureCameraBackdrop(page) {
 }
 
 async function focusCamera(page, selector, options = {}) {
-  const { zoom = 1.14, spotlight = true, waitMs = 850, padding = 12, scrollMs = 350, settleMs = 700 } = options;
+  const { zoom = 1.14, spotlight = true, stable = false, waitMs = 850, padding = 12, scrollMs = 350, settleMs = 700 } = options;
   await resetCamera(page, 0);
   const locator = await visibleLocator(page, selector);
-  await locator.evaluate((node) => node.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" }));
-  await page.waitForTimeout(scrollMs);
+  const initialBox = await locator.boundingBox();
+  const needsStableScroll = !initialBox || initialBox.y < 54 || initialBox.y + initialBox.height > 796;
+  if (!stable || needsStableScroll) {
+    await locator.evaluate((node, keepStable) => node.scrollIntoView({
+      block: keepStable ? "nearest" : "center",
+      inline: "nearest",
+      behavior: keepStable ? "instant" : "smooth",
+    }), stable);
+    if (stable) await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    else await page.waitForTimeout(scrollMs);
+  }
   const box = await locator.boundingBox();
   if (!box) throw new Error(`Could not measure ${selector}`);
+  if (stable) {
+    // Founder footage keeps the complete interface in frame. Moving and scaling
+    // the whole application around every target made large cards clip at the
+    // viewport and caused the focus outline to chase transformed bounds.
+    await page.evaluate(() => {
+      const focus = document.getElementById("demo-recorder-focus");
+      const backdrop = document.getElementById("demo-recorder-backdrop");
+      if (focus) focus.style.opacity = "0";
+      if (backdrop) backdrop.style.opacity = "0";
+    });
+    if (settleMs) await page.waitForTimeout(settleMs);
+    if (waitMs) await page.waitForTimeout(waitMs);
+    return locator;
+  }
   await captureCameraBackdrop(page);
   const scale = Math.max(1, Math.min(Number(zoom), 1.28));
   await page.evaluate(({ x, y, scaleValue }) => {
@@ -541,7 +564,9 @@ function founderCue(scene, cue) {
 }
 
 function founderCamera(options = {}) {
-  return { scrollMs: 130, settleMs: 360, waitMs: 160, ...options };
+  // The founder cut uses a single visual coordinate system. Cursor movement and
+  // the active story phase provide emphasis without panning or a floating box.
+  return { scrollMs: 90, settleMs: 80, waitMs: 120, ...options, stable: true, spotlight: false };
 }
 
 function currentEpisode(snapshot) {
@@ -1046,7 +1071,9 @@ async function recordCandidate(chromium, options) {
       if (options.syncProfile === "founder") {
         await setCursorVisible(page, false);
         await focusCamera(page, UI.airportMap, founderCamera({ zoom: 1.04, spotlight: false, waitMs: 80 }));
-        await atAudio("disruption");
+        // Start the graph/model work early enough that the 08:36 evidence is
+        // settled when the narration names it.
+        await atAudio(1.4);
         await setCursorVisible(page, true);
         await demoClick(page, UI.jump, { pointMs: 100 });
         proposedSnapshot = await snapshotWhen(options.url, (snapshot) => {
@@ -1056,6 +1083,7 @@ async function recordCandidate(chromium, options) {
         await waitUntilIdle(page);
         proposedStory = await getDecisionStory(options.url, currentEpisode(proposedSnapshot));
         assertProposedStory(proposedStory, proposedSnapshot);
+        await atAudio("disruption");
         await clickStoryPhase(page, "trigger", { fast: true });
         await focusCamera(page, UI.whyNow, founderCamera({ zoom: 1.16, spotlight: true }));
         await setCursorVisible(page, false);
@@ -1368,6 +1396,9 @@ async function recordCandidate(chromium, options) {
     created_at: new Date().toISOString(),
     source_url: options.url,
     viewport: "1440x900",
+    visual_treatment: options.syncProfile === "founder"
+      ? { camera: "stable full interface", focus_outline: false, caption_safe_zone_bottom_px: 84 }
+      : { camera: "guided zoom", focus_outline: true, caption_safe_zone_bottom_px: 84 },
     health: { runtime_mode: health.runtime_mode, graph: health.graph, endpoint: health.endpoint, llm: health.llm, agents: health.agents },
     narration: {
       source: options.narrationDir ? "human-files" : "macos-say",

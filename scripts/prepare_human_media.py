@@ -20,6 +20,9 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = REPOSITORY_ROOT / ".artifacts" / "human-media" / "narration"
+TARGET_LUFS = -14.5
+TARGET_LRA = 6
+TARGET_TRUE_PEAK = -1.5
 
 
 @dataclass(frozen=True)
@@ -33,12 +36,12 @@ class Scene:
 
 SCENES = (
     Scene("00-hook", "1.mov", 0.35, 18.00, 1.03),
-    Scene("01-why-now", "missed.m4a", 0.00, 19.00, 1.12),
-    Scene("02-findings", "2.m4a", 0.35, 19.10, 1.06),
-    Scene("03-options", "3.m4a", 0.35, 21.10, 1.06),
-    Scene("04-apply", "4.m4a", 0.35, 21.95, 1.12),
-    Scene("05-restraint", "5.m4a", 0.12, 17.75, 1.08),
-    Scene("06-memory-knowledge", "6.m4a", 0.28, 22.20, 1.12),
+    Scene("01-why-now", "missed.m4a", 0.00, 19.00, 1.04),
+    Scene("02-findings", "2.m4a", 0.35, 19.10, 1.05),
+    Scene("03-options", "3.m4a", 0.35, 21.10, 1.05),
+    Scene("04-apply", "4.m4a", 0.35, 21.95, 1.07),
+    Scene("05-restraint", "5.m4a", 0.12, 17.75, 1.06),
+    Scene("06-memory-knowledge", "6.m4a", 0.28, 22.20, 1.07),
     Scene("07-airports", "7.m4a", 0.19, 6.35, 1.02),
     Scene("08-close", "8.mov", 0.90, 41.40, 1.05),
 )
@@ -88,10 +91,14 @@ def duration(path: Path) -> float:
 def clean_filter(tempo: float) -> str:
     return ",".join(
         (
-            "highpass=f=70",
-            "lowpass=f=14000",
-            "afftdn=nr=6:nf=-38:tn=1",
-            "acompressor=threshold=0.063:ratio=2.2:attack=20:release=200:makeup=1.6",
+            "highpass=f=82",
+            "lowpass=f=14500",
+            "afftdn=nr=5:nf=-42:tn=1:gs=4",
+            "agate=threshold=0.012:ratio=2:range=0.25:attack=15:release=220:knee=2.5",
+            "equalizer=f=180:t=q:w=1.1:g=-1.2",
+            "equalizer=f=3200:t=q:w=1.0:g=1.8",
+            "deesser=i=0.16:m=0.35:f=0.55",
+            "acompressor=threshold=0.055:ratio=1.5:attack=15:release=180:makeup=1.2",
             f"atempo={tempo:.5f}",
         )
     )
@@ -112,7 +119,7 @@ def measure_loudness(source: Path, scene: Scene) -> dict[str, float]:
             "-map",
             "0:a:0",
             "-af",
-            f"{clean_filter(scene.tempo)},loudnorm=I=-16:LRA=7:TP=-1.5:print_format=json",
+            f"{clean_filter(scene.tempo)},loudnorm=I={TARGET_LUFS}:LRA={TARGET_LRA}:TP={TARGET_TRUE_PEAK}:print_format=json",
             "-f",
             "null",
             "-",
@@ -135,8 +142,10 @@ def measure_loudness(source: Path, scene: Scene) -> dict[str, float]:
 
 def prepare_scene(source: Path, target: Path, scene: Scene) -> dict[str, object]:
     measured = measure_loudness(source, scene)
+    speech_duration = (scene.trim_end - scene.trim_start) / scene.tempo
+    fade_out_start = max(0.0, speech_duration - 0.12)
     loudnorm = (
-        "loudnorm=I=-16:LRA=7:TP=-1.5:linear=true:print_format=summary:"
+        f"loudnorm=I={TARGET_LUFS}:LRA={TARGET_LRA}:TP={TARGET_TRUE_PEAK}:linear=true:print_format=summary:"
         f"measured_I={measured['input_i']}:"
         f"measured_LRA={measured['input_lra']}:"
         f"measured_TP={measured['input_tp']}:"
@@ -160,7 +169,8 @@ def prepare_scene(source: Path, target: Path, scene: Scene) -> dict[str, object]
             "-map",
             "0:a:0",
             "-af",
-            f"{clean_filter(scene.tempo)},{loudnorm},alimiter=limit=0.891:level=false",
+            f"{clean_filter(scene.tempo)},{loudnorm},alimiter=limit=0.84:level=false,"
+            f"afade=t=in:st=0:d=0.02,afade=t=out:st={fade_out_start:.5f}:d=0.12",
             "-ar",
             "48000",
             "-ac",
@@ -216,7 +226,7 @@ def main() -> None:
 
     total = round(sum(float(item["output_duration_seconds"]) for item in records), 3)
     manifest = {
-        "audio_target": {"integrated_lufs": -16, "true_peak_dbtp": -1.5, "sample_rate_hz": 48000, "channels": 1},
+        "audio_target": {"integrated_lufs": TARGET_LUFS, "true_peak_dbtp": TARGET_TRUE_PEAK, "sample_rate_hz": 48000, "channels": 1},
         "total_duration_seconds": total,
         "scenes": records,
     }

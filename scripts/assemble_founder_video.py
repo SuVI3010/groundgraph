@@ -55,12 +55,12 @@ def rounded_panel(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], *, 
 def opening_graphic(target: Path) -> None:
     image = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    rounded_panel(draw, (812, 118, 1380, 510), fill=(2, 14, 23, 230))
-    draw.rounded_rectangle((850, 154, 1276, 196), radius=21, fill=(69, 216, 255, 35), outline=(69, 216, 255, 120), width=1)
-    draw.text((873, 165), "GROUNDGRAPH  •  O'HARE REPLAY", font=font(17, mono=True), fill=(151, 239, 255, 255))
-    draw.text((858, 238), "ONE DELAY", font=font(54), fill=(244, 252, 255, 255), stroke_width=1, stroke_fill=(244, 252, 255, 90))
-    draw.text((858, 304), "RARELY STAYS", font=font(54), fill=(244, 252, 255, 255), stroke_width=1, stroke_fill=(244, 252, 255, 90))
-    draw.text((858, 370), "ONE DELAY.", font=font(54), fill=(85, 228, 170, 255), stroke_width=1, stroke_fill=(85, 228, 170, 80))
+    rounded_panel(draw, (884, 132, 1396, 506), fill=(2, 14, 23, 246), outline=(77, 218, 255, 125), radius=22, width=1)
+    draw.rounded_rectangle((920, 166, 1360, 208), radius=21, fill=(69, 216, 255, 30), outline=(69, 216, 255, 105), width=1)
+    draw.text((944, 177), "GROUNDGRAPH  •  O'HARE REPLAY", font=font(16, mono=True), fill=(151, 239, 255, 255))
+    draw.text((926, 248), "ONE DELAY", font=font(46), fill=(244, 252, 255, 255), stroke_width=1, stroke_fill=(244, 252, 255, 90))
+    draw.text((926, 306), "RARELY STAYS", font=font(46), fill=(244, 252, 255, 255), stroke_width=1, stroke_fill=(244, 252, 255, 90))
+    draw.text((926, 364), "ONE DELAY.", font=font(46), fill=(85, 228, 170, 255), stroke_width=1, stroke_fill=(85, 228, 170, 80))
     draw.rounded_rectangle((68, 755, 550, 854), radius=16, fill=(3, 16, 25, 224), outline=(255, 255, 255, 40), width=1)
     draw.rectangle((68, 755, 76, 854), fill=(69, 216, 255, 255))
     draw.text((102, 776), "VISWESH SURI", font=font(27), fill=(245, 252, 255, 255))
@@ -80,30 +80,33 @@ def closing_graphic(target: Path, active: set[int] | None = None, *, final: bool
     image = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     if final:
-        rounded_panel(draw, (770, 188, 1384, 708), fill=(2, 14, 23, 235))
-        draw.text((824, 246), "SEE. COORDINATE. EXPLAIN. LEARN.", font=font(17, mono=True), fill=(151, 239, 255, 255))
-        draw.text((824, 340), "THAT'S", font=font(54), fill=(244, 252, 255, 255))
-        draw.text((824, 410), "GROUNDGRAPH.", font=font(54), fill=(85, 228, 170, 255))
-        draw.rounded_rectangle((824, 540, 1334, 607), radius=14, fill=(69, 216, 255, 24), outline=(69, 216, 255, 100), width=1)
-        draw.text((850, 562), "github.com/SuVI3010/groundgraph", font=font(19, mono=True), fill=(218, 247, 255, 255))
+        rounded_panel(draw, (940, 226, 1396, 666), fill=(2, 14, 23, 246), outline=(77, 218, 255, 125), radius=22, width=1)
+        draw.text((980, 274), "SEE  •  COORDINATE", font=font(15, mono=True), fill=(151, 239, 255, 255))
+        draw.text((980, 302), "EXPLAIN  •  LEARN", font=font(15, mono=True), fill=(151, 239, 255, 255))
+        draw.text((980, 382), "THAT'S", font=font(43), fill=(244, 252, 255, 255))
+        draw.text((980, 440), "GROUNDGRAPH.", font=font(43), fill=(85, 228, 170, 255))
+        draw.rounded_rectangle((976, 552, 1360, 612), radius=13, fill=(69, 216, 255, 22), outline=(69, 216, 255, 90), width=1)
+        draw.text((995, 573), "github.com/SuVI3010/groundgraph", font=font(15, mono=True), fill=(218, 247, 255, 255))
         return image.save(target)
 
     active = active or set()
-    rounded_panel(draw, (760, 86, 1384, 816), fill=(2, 14, 23, 232))
-    draw.text((808, 132), "THE GROUNDGRAPH LOOP", font=font(18, mono=True), fill=(151, 239, 255, 255))
-    draw.text((808, 175), "Every decision stays visible.", font=font(32), fill=(245, 252, 255, 255))
-    y = 258
+    rounded_panel(draw, (930, 108, 1396, 792), fill=(2, 14, 23, 246), outline=(77, 218, 255, 115), radius=22, width=1)
+    draw.text((968, 150), "THE GROUNDGRAPH LOOP", font=font(15, mono=True), fill=(151, 239, 255, 255))
+    draw.text((968, 190), "Every decision", font=font(26), fill=(245, 252, 255, 255))
+    draw.text((968, 224), "stays visible.", font=font(26), fill=(245, 252, 255, 255))
+    y = 302
     for index, (number, label) in enumerate(LOOP_ROWS):
         highlighted = index in active
-        fill = (85, 228, 170, 36) if highlighted else (255, 255, 255, 9)
-        outline = (85, 228, 170, 150) if highlighted else (255, 255, 255, 30)
-        rounded_panel(draw, (804, y, 1340, y + 92), fill=fill, outline=outline, radius=15, width=2 if highlighted else 1)
-        circle = (85, 228, 170, 255) if highlighted else (69, 216, 255, 55)
-        draw.ellipse((828, y + 22, 878, y + 72), fill=circle, outline=(120, 240, 255, 130), width=1)
-        draw.text((841, y + 34), number, font=font(15, mono=True), fill=(3, 22, 25, 255) if highlighted else (181, 235, 247, 255))
-        draw.text((904, y + 33), label, font=font(21), fill=(235, 252, 245, 255) if highlighted else (170, 190, 201, 230))
-        y += 112
-    draw.text((808, 742), "FALKORDB  •  SHARED STATE + MEMORY + EVIDENCE", font=font(14, mono=True), fill=(128, 177, 192, 255))
+        fill = (12, 55, 42, 255) if highlighted else (7, 25, 33, 255)
+        outline = (85, 228, 170, 130) if highlighted else (255, 255, 255, 22)
+        rounded_panel(draw, (966, y, 1362, y + 72), fill=fill, outline=outline, radius=13, width=1)
+        circle = (85, 228, 170, 255) if highlighted else (69, 216, 255, 48)
+        draw.ellipse((986, y + 18, 1022, y + 54), fill=circle, outline=(120, 240, 255, 110), width=1)
+        draw.text((995, y + 27), number, font=font(11, mono=True), fill=(3, 22, 25, 255) if highlighted else (181, 235, 247, 255))
+        draw.text((1042, y + 27), label, font=font(15), fill=(235, 252, 245, 255) if highlighted else (170, 190, 201, 230))
+        y += 88
+    draw.text((968, 704), "FALKORDB  •  SHARED STATE", font=font(12, mono=True), fill=(128, 177, 192, 255))
+    draw.text((968, 726), "+ MEMORY + EVIDENCE", font=font(12, mono=True), fill=(128, 177, 192, 255))
     image.save(target)
 
 
@@ -335,13 +338,13 @@ def main() -> None:
     final_brand = (39.16 - close_raw_start) / 1.05
 
     face_filter = (
-        "scale=1440:960:flags=lanczos,crop=1440:900:0:30,"
+        "scale=1160:774:flags=lanczos,pad=1440:900:0:63:color=0x000000,"
         "eq=brightness=0.035:contrast=1.08:saturation=0.96:gamma=1.07,"
         "unsharp=5:5:0.35:5:5:0.0,fps=30,format=rgba"
     )
     filter_complex = ";".join(
         (
-            "[0:v]fps=30,setpts=PTS-STARTPTS,format=rgba[base]",
+            "[0:v]fps=30,setpts=PTS-STARTPTS,format=rgba,tpad=stop_mode=clone:stop_duration=0.12[base]",
             f"[1:v]trim=start=0.226:end=4.14,setpts=(PTS-STARTPTS)/1.03,{face_filter},fade=t=out:st={opening_cut - 0.22:.3f}:d=0.22:alpha=1[openface]",
             "[openface][3:v]overlay=0:0:format=auto:eof_action=repeat[openart]",
             f"[2:v]trim=start={close_raw_start:.3f}:end=42.25,setpts=(PTS-STARTPTS)/1.05,{face_filter},fade=t=in:st=0:d=0.18:alpha=1[closeface]",
