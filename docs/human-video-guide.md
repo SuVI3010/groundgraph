@@ -1,5 +1,7 @@
 # Human-led final demo guide
 
+For the exact record-ready wording with action pauses, use [`demo/human-recording-script.md`](../demo/human-recording-script.md).
+
 Target length: **2:40–2:50**. The final video should feel like one founder explaining one airport problem, not a narrated product tour. Begin and end with a real person on camera. Use the product only when it supplies evidence for the sentence being spoken.
 
 This is an editing guide for a new human version. It does not replace or modify `demo/groundgraph-demo.mp4`, `demo/narration-scenes.json`, or the validated automated recorder. Keep those files as the reproducible proof package.
