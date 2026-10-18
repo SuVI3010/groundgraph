@@ -13,6 +13,7 @@ const repoRoot = path.resolve(scriptDir, "..");
 const require = createRequire(import.meta.url);
 
 const SCENE_ORDER = ["hook", "why-now", "findings", "options", "apply", "restraint", "memory-knowledge", "airports", "close"];
+const NARRATION_EXTENSIONS = [".wav", ".m4a", ".aiff", ".aif", ".mp3"];
 const UI = {
   airportSelector: "#airport-selector, #airport-switcher",
   airportButton: "#airport-switcher, #airport-selector button",
@@ -37,6 +38,7 @@ function parseArgs(argv) {
     url: "http://127.0.0.1:5050/",
     voice: "Daniel",
     rate: "185",
+    narrationDir: null,
     secondaryAirport: "ATL",
     output: path.join(repoRoot, "demo", "groundgraph-demo-candidate.mp4"),
     screenshot: path.join(repoRoot, ".artifacts", "demo-pipeline", "dry-run.png"),
@@ -53,6 +55,7 @@ function parseArgs(argv) {
     else if (argument.startsWith("--url=")) options.url = argument.slice("--url=".length);
     else if (argument.startsWith("--voice=")) options.voice = argument.slice("--voice=".length);
     else if (argument.startsWith("--rate=")) options.rate = argument.slice("--rate=".length);
+    else if (argument.startsWith("--narration-dir=")) options.narrationDir = path.resolve(repoRoot, argument.slice("--narration-dir=".length));
     else if (argument.startsWith("--secondary-airport=")) options.secondaryAirport = argument.slice("--secondary-airport=".length).toUpperCase();
     else if (argument.startsWith("--output=")) options.output = path.resolve(repoRoot, argument.slice("--output=".length));
     else if (argument.startsWith("--screenshot=")) options.screenshot = path.resolve(repoRoot, argument.slice("--screenshot=".length));
@@ -75,10 +78,15 @@ Options:
   --url=http://127.0.0.1:5050/
   --output=demo/groundgraph-demo-candidate.mp4
   --voice=Daniel --rate=185
+  --narration-dir=demo/narration-human
   --secondary-airport=ATL
   --screenshot=.artifacts/demo-pipeline/dry-run.png
   --keep-work   Retain captured JPEG frames, subtitles, and intermediate audio.
   --force       Replace an existing candidate output.
+
+Use --narration-dir to replace macOS say with one canonical numbered audio
+clip per scene. Run --dry-run with the same directory to validate the clips
+and planned duration without changing replay state.
 
 The recorder refuses to write demo/groundgraph-demo.mp4. It also refuses to
 record unless the UI, FalkorDB state, Qwen allowlist, seven guards, real
@@ -175,15 +183,56 @@ function probeDuration(file) {
   return Number(command("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file], { capture: true }));
 }
 
-function prepareNarration(scenes, directory, voice, rate) {
+function fileSha256(file) {
+  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function narrationScene(scene, audio, source) {
+  assert(fs.statSync(audio).size > 0, `narration clip is empty: ${path.basename(audio)}`);
+  const audioDuration = probeDuration(audio);
+  assert(Number.isFinite(audioDuration) && audioDuration > 0, `narration clip has no readable duration: ${path.basename(audio)}`);
+  return {
+    ...scene,
+    audio,
+    audioDuration,
+    audioSource: source,
+    audioSha256: fileSha256(audio),
+    minimumDuration: Math.max(Number(scene.minimum_seconds), audioDuration + 1.5),
+  };
+}
+
+function validateNarrationTiming(scenes) {
+  const plannedMinimum = scenes.reduce((total, scene) => total + scene.minimumDuration, 0);
+  assert(plannedMinimum >= 140, `narration plan is too short: ${plannedMinimum.toFixed(1)} seconds; minimum is 140`);
+  assert(plannedMinimum <= 190, `narration plan is too long: ${plannedMinimum.toFixed(1)} seconds before runtime waits; maximum is 190`);
+  return plannedMinimum;
+}
+
+function prepareHumanNarration(scenes, narrationDir) {
+  assert(fs.existsSync(narrationDir) && fs.statSync(narrationDir).isDirectory(), `narration directory does not exist: ${narrationDir}`);
+  const prepared = scenes.map((scene, index) => {
+    const stem = `${String(index).padStart(2, "0")}-${scene.id}`;
+    const matches = NARRATION_EXTENSIONS
+      .map((extension) => path.join(narrationDir, `${stem}${extension}`))
+      .filter((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    assert(matches.length === 1, `${stem} requires exactly one clip with one of these extensions: ${NARRATION_EXTENSIONS.join(", ")}`);
+    return narrationScene(scene, matches[0], "human-files");
+  });
+  validateNarrationTiming(prepared);
+  return prepared;
+}
+
+function prepareNarration(scenes, directory, options) {
+  if (options.narrationDir) return prepareHumanNarration(scenes, options.narrationDir);
   const audioDir = path.join(directory, "narration");
   fs.mkdirSync(audioDir, { recursive: true });
-  return scenes.map((scene, index) => {
+  const prepared = scenes.map((scene, index) => {
     const audio = path.join(audioDir, `${String(index).padStart(2, "0")}-${scene.id}.aiff`);
-    command("say", ["-v", voice, "-r", String(rate), "-o", audio, scene.narration]);
-    const audioDuration = probeDuration(audio);
-    return { ...scene, audio, audioDuration, minimumDuration: Math.max(Number(scene.minimum_seconds), audioDuration + 1.5) };
+    command("say", ["-v", options.voice, "-r", String(options.rate), "-o", audio, scene.narration]);
+    return narrationScene(scene, audio, "macos-say");
   });
+  validateNarrationTiming(prepared);
+  return prepared;
 }
 
 async function launchPage(chromium) {
@@ -475,6 +524,22 @@ async function selectAirportUi(page, code) {
 }
 
 async function readOnlyDryRun(chromium, options) {
+  const narrationScenes = loadScenes();
+  let narrationPreflight = { source: "macos-say", planned_minimum_seconds: null };
+  if (options.narrationDir) {
+    requireCommand("ffprobe");
+    const prepared = prepareHumanNarration(narrationScenes, options.narrationDir);
+    narrationPreflight = {
+      source: "human-files",
+      planned_minimum_seconds: Number(prepared.reduce((total, scene) => total + scene.minimumDuration, 0).toFixed(3)),
+      files: prepared.map((scene) => ({
+        scene: scene.id,
+        file: path.basename(scene.audio),
+        sha256: scene.audioSha256,
+        duration_seconds: Number(scene.audioDuration.toFixed(3)),
+      })),
+    };
+  }
   const [snapshot, health, airports] = await Promise.all([
     jsonRequest(options.url, "/api/snapshot"),
     jsonRequest(options.url, "/api/health"),
@@ -482,7 +547,6 @@ async function readOnlyDryRun(chromium, options) {
   ]);
   validateHealth(health);
   assert(list(airports.airports).length >= 2, "dry run requires at least two registered airports");
-  loadScenes();
   const { browser, page } = await launchPage(chromium);
   try {
     await page.route("**/api/**", async (route) => {
@@ -529,6 +593,7 @@ async function readOnlyDryRun(chromium, options) {
       screenshot: options.screenshot,
       active_scenario: snapshot.scenario?.id,
       airports: airports.airports.map((item) => item.code),
+      narration_preflight: narrationPreflight,
       ...report,
     }, null, 2));
   } finally { await browser.close(); }
@@ -691,7 +756,15 @@ async function recordCandidate(chromium, options) {
   assert(!fs.existsSync(options.output) || options.force, `${options.output} exists; choose another path or add --force`);
   requireCommand("ffmpeg");
   requireCommand("ffprobe");
-  requireCommand("say");
+  if (!options.narrationDir) requireCommand("say");
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const workDirectory = path.join(repoRoot, ".artifacts", "demo-pipeline", `recording-${stamp}`);
+  const framesDirectory = path.join(workDirectory, "frames");
+  fs.mkdirSync(framesDirectory, { recursive: true });
+  fs.mkdirSync(path.dirname(options.output), { recursive: true });
+  const scenes = prepareNarration(loadScenes(), workDirectory, options);
+
   const initialHealth = await jsonRequest(options.url, "/api/health");
   validateHealth(initialHealth);
   const catalog = await jsonRequest(options.url, "/api/scenarios");
@@ -710,13 +783,6 @@ async function recordCandidate(chromium, options) {
   assert(Number(initial.clock?.cycle) === 0 && !initial.current_plan, "recording must start at cycle zero without a plan");
   assert(Number(initial.memory?.episode_count || 0) === 0, "recording must start without rehearsal memory");
   const ordSignature = snapshotSignature(initial);
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const workDirectory = path.join(repoRoot, ".artifacts", "demo-pipeline", `recording-${stamp}`);
-  const framesDirectory = path.join(workDirectory, "frames");
-  fs.mkdirSync(framesDirectory, { recursive: true });
-  fs.mkdirSync(path.dirname(options.output), { recursive: true });
-  const scenes = prepareNarration(loadScenes(), workDirectory, options.voice, options.rate);
 
   const { browser, context, page } = await launchPage(chromium);
   const sceneRecords = [];
@@ -946,10 +1012,17 @@ async function recordCandidate(chromium, options) {
     viewport: "1440x900",
     health: { runtime_mode: health.runtime_mode, graph: health.graph, endpoint: health.endpoint, llm: health.llm, agents: health.agents },
     narration: {
-      voice: options.voice,
-      rate: options.rate,
+      source: options.narrationDir ? "human-files" : "macos-say",
+      voice: options.narrationDir ? "human narrator" : options.voice,
+      rate: options.narrationDir ? null : options.rate,
       word_count: scenes.reduce((total, scene) => total + words(scene.narration).length, 0),
       burned_in_subtitles: true,
+      files: scenes.map((scene) => ({
+        scene: scene.id,
+        file: path.basename(scene.audio),
+        sha256: scene.audioSha256,
+        duration_seconds: Number(scene.audioDuration.toFixed(3)),
+      })),
     },
     semantic_proof: proof,
     scenes: sceneRecords.map(({ id, title, narration, audioDuration, duration }) => ({

@@ -2,6 +2,8 @@
 
 The recorder creates a **1440×900 review candidate** from the running release. It drives the real interface, focuses one decision step at a time, burns readable subtitles into the picture, and stores the API evidence used to validate every narrated claim.
 
+For the founder-led final cut, use the conversational script, face-shot plan, and current benchmark sequence in [Human-led final demo guide](human-video-guide.md).
+
 It never overwrites `demo/groundgraph-demo.mp4`. Candidate review and promotion remain separate steps.
 
 ## Dependencies
@@ -10,7 +12,7 @@ It never overwrites `demo/groundgraph-demo.mp4`. Candidate review and promotion 
 - Google Chrome or Chromium;
 - Node.js 20 or newer;
 - Playwright 1.62.1 or newer;
-- macOS `say`; and
+- macOS `say` when generated narration is used; and
 - `ffmpeg` and `ffprobe`.
 
 The wrapper can use the Playwright copy bundled with Codex. On another machine:
@@ -46,6 +48,59 @@ The default target uses Daniel at 185 words per minute and switches ORD to ATL:
 
 Expected duration is **about 2:40–2:50**. Runtime model latency may extend a scene, but the finished candidate must remain between 2:20 and 3:10 or the recorder rejects it.
 
+### Use human narration
+
+Pass `--narration-dir` to replace `say` with one recording per scene. The
+directory must contain exactly one supported audio file for each canonical
+stem. Supported extensions are `.wav`, `.m4a`, `.aiff`, `.aif`, and `.mp3`:
+
+```text
+00-hook.wav
+01-why-now.wav
+02-findings.wav
+03-options.wav
+04-apply.wav
+05-restraint.wav
+06-memory-knowledge.wav
+07-airports.wav
+08-close.wav
+```
+
+The extension may differ by clip, but do not provide two files with the same
+stem. Read the corresponding text in `demo/narration-scenes.json` verbatim so
+the burned captions match the recording. Trim long silence at the beginning
+and end, keep the microphone position consistent, and leave natural pauses
+inside the sentence.
+
+Validate the clips, hashes, readable durations, and minimum planned runtime
+without changing replay state:
+
+```bash
+./scripts/record_demo.sh \
+  --dry-run \
+  --narration-dir=demo/narration-human
+```
+
+Then record the candidate:
+
+```bash
+./scripts/record_demo.sh \
+  --record \
+  --allow-mutations \
+  --force \
+  --narration-dir=demo/narration-human \
+  --secondary-airport=ATL \
+  --output=demo/groundgraph-human-candidate.mp4 \
+  --keep-work
+```
+
+The manifest identifies the narration source and records each clip's basename,
+duration, and SHA-256 hash. Scene visuals still wait for the longer of the
+declared minimum or the recorded clip plus 1.5 seconds. This retains the same
+captions, evidence checks, and scene order as generated narration. A single
+continuous master track is not accepted because live API and model latency can
+change individual scene lengths.
+
 The explicit mutation flag is required because the run:
 
 1. selects and clears the ORD replay;
@@ -74,7 +129,7 @@ The candidate produces:
 - `groundgraph-demo-candidate-cover.jpg`; and
 - `groundgraph-demo-candidate.manifest.json`.
 
-The manifest records runtime health, narration settings and word count, scene timings, frame count, SHA-256, and semantic proof for the applied episode, deliberate no-action episode, and distinct airport graphs.
+The manifest records runtime health, narration source, clip hashes, word count, scene timings, frame count, SHA-256, and semantic proof for the applied episode, deliberate no-action episode, and distinct airport graphs.
 
 Use `--keep-work` to retain captured frames, intermediate audio, and the generated SRT file. Without it, temporary material is removed only after the candidate and manifest are complete.
 
