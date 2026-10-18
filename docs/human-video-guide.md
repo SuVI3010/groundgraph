@@ -138,8 +138,8 @@ For the **strongest founder-led cut**, use the revised script below and edit the
 
 **Shot sequence:**
 
-- **2:09–2:19:** Switch to **Real-day test** and show the completed July 27 scorecard. Use a short speed-ramped clock sequence rather than showing the full replay.
-- **2:19–2:36:** Cut to one clean metrics card for the 30-day benchmark. Keep the exact counts visible without reading them aloud, then animate the comparison.
+- **2:09–2:17:** Begin on the shared graph and agent handoffs. On “We then replayed,” flash the completed July 27 scorecard with a short speed-ramped clock sequence.
+- **2:17–2:36:** Cut to one clean metrics card for the 30-day benchmark. Keep the exact counts visible without reading them aloud, then animate the comparison.
 - **2:36–2:48:** Return to the founder on camera. Finish with the GroundGraph name and repository URL beside, not over, the speaker's face.
 
 **Say:**
