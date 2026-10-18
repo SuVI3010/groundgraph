@@ -115,6 +115,11 @@ body.engine-offline #airport-canvas{filter:saturate(.25) brightness(.58)}body.en
   .brain-card{grid-template-rows:auto auto auto minmax(150px,1fr) auto auto;gap:8px;padding:12px 14px}
 }
 
+/* Episodic memory stays readable when its graph context is expanded. */
+.memory-context-path{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding-top:7px;border-top:1px solid var(--line)}
+.memory-context-path>span{min-width:0;display:grid;gap:2px;padding:7px;border:1px solid rgba(85,228,170,.2);border-radius:7px;color:#d8e6eb;background:var(--green-soft);font-size:9px}
+.memory-context-path>span b{color:#91e9be;font-size:8px;letter-spacing:.08em;text-transform:uppercase}
+
 @media(min-width:1181px) and (max-width:1260px){
   .app-shell{height:auto;min-height:100dvh;grid-template-rows:auto auto auto auto auto}
   .situation-rail{grid-template-columns:1fr}

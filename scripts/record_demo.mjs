@@ -52,7 +52,18 @@ const FOUNDER_SYNC = Object.freeze({
   "memory-knowledge": {
     referenceDuration: 20.472,
     captionStarts: [0, 6.74, 10.78],
-    cues: { contextMatch: 6.74, operatorAsks: 10.78, companyBrain: 14.09, evidence: 19.53 },
+    cues: {
+      memoryStored: 0.78,
+      event: 3.18,
+      rotation: 4.18,
+      resources: 4.98,
+      policy: 5.78,
+      contextSentence: 6.74,
+      contextMatch: 9.18,
+      operatorAsks: 10.78,
+      companyBrain: 14.09,
+      evidence: 19.53,
+    },
   },
   airports: {
     referenceDuration: 6.055,
@@ -368,7 +379,7 @@ async function visibleLocator(page, selector, timeout = 20_000) {
 
 async function injectDemoOverlay(page) {
   await page.evaluate(() => {
-    for (const id of ["demo-recorder-style", "demo-recorder-backdrop", "demo-recorder-cursor", "demo-recorder-scene", "demo-recorder-focus", "demo-recorder-caption"]) document.getElementById(id)?.remove();
+    for (const id of ["demo-recorder-style", "demo-recorder-backdrop", "demo-recorder-cursor", "demo-recorder-scene", "demo-recorder-focus", "demo-recorder-caption", "demo-recorder-detail-shade", "demo-recorder-detail"]) document.getElementById(id)?.remove();
     const style = document.createElement("style");
     style.id = "demo-recorder-style";
     style.textContent = `
@@ -382,6 +393,28 @@ async function injectDemoOverlay(page) {
       #demo-recorder-focus { position:fixed; z-index:9002; display:block; border:2px solid rgba(69,216,255,.82); border-radius:15px; box-shadow:0 0 0 9999px rgba(1,8,15,.48),0 0 35px rgba(69,216,255,.22); opacity:0; transition:left .45s,top .45s,width .45s,height .45s,opacity .25s; pointer-events:none; }
       #demo-recorder-caption { position:fixed; z-index:9006; left:50%; bottom:16px; width:min(920px,calc(100vw - 120px)); min-height:50px; display:grid; place-items:center; padding:8px 19px; border:1px solid rgba(166,226,244,.30); border-radius:12px; color:#fff; background:rgba(2,10,17,.95); box-shadow:0 12px 30px rgba(0,0,0,.52); opacity:0; transform:translate(-50%,8px); transition:opacity .18s,transform .18s; pointer-events:none; text-align:center; font:750 18px/1.32 ui-sans-serif,system-ui,sans-serif; letter-spacing:.005em; text-wrap:balance; }
       #demo-recorder-caption.visible { opacity:1; transform:translate(-50%,0); }
+      #demo-recorder-detail-shade { position:fixed; inset:0; z-index:9002; background:rgba(1,8,14,.60); opacity:0; transition:opacity .22s; pointer-events:none; }
+      #demo-recorder-detail-shade.visible { opacity:1; }
+      #demo-recorder-detail { position:fixed; z-index:9003; left:50%; top:48%; width:min(980px,calc(100vw - 120px)); max-height:610px; overflow:auto; border:1px solid rgba(80,220,255,.38); border-radius:18px; color:#edfaff; background:linear-gradient(180deg,rgba(10,31,44,.995),rgba(4,17,26,.995)); box-shadow:0 34px 100px rgba(0,0,0,.68),0 0 0 1px rgba(255,255,255,.025) inset; opacity:0; transform:translate(-50%,-47%) scale(.985); transition:opacity .22s,transform .28s cubic-bezier(.2,.8,.2,1); pointer-events:none; font-family:ui-sans-serif,system-ui,sans-serif; }
+      #demo-recorder-detail.visible { opacity:1; transform:translate(-50%,-50%) scale(1); pointer-events:auto; }
+      #demo-recorder-detail>.demo-detail-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:15px 20px; border-bottom:1px solid rgba(145,184,199,.18); background:rgba(80,220,255,.035); }
+      #demo-recorder-detail>.demo-detail-header>span { display:grid; gap:3px; }
+      #demo-recorder-detail>.demo-detail-header small { color:#6be4ff; font:900 10px/1 ui-monospace,SFMono-Regular,monospace; letter-spacing:.11em; }
+      #demo-recorder-detail>.demo-detail-header strong { font-size:20px; letter-spacing:-.01em; }
+      #demo-recorder-detail>.demo-detail-header .brain-status { padding:6px 9px; border:1px solid rgba(85,228,170,.3); border-radius:999px; color:#a5efcb; background:rgba(85,228,170,.08); font:850 10px/1 ui-monospace,SFMono-Regular,monospace; letter-spacing:.06em; }
+      #demo-recorder-detail .brain-response { display:grid; gap:13px; padding:18px 22px 20px; }
+      #demo-recorder-detail .brain-response>header { display:flex; align-items:start; justify-content:space-between; gap:16px; }
+      #demo-recorder-detail .brain-response>header strong { overflow:visible; color:#fff; font-size:18px; line-height:1.3; text-overflow:clip; white-space:normal; }
+      #demo-recorder-detail .brain-answer-type { flex:0 0 auto; padding:5px 8px; font-size:10px; }
+      #demo-recorder-detail .brain-response>p { margin:0; color:#dcebee; font-size:16px; line-height:1.55; }
+      #demo-recorder-detail .brain-proof-row { display:flex; flex-wrap:wrap; gap:6px; }
+      #demo-recorder-detail .brain-proof-row::before { content:"FALKORDB GRAPH PATH RETURNED WITH THIS ANSWER"; flex:0 0 100%; color:#6be4ff; font:900 10px/1 ui-monospace,SFMono-Regular,monospace; letter-spacing:.09em; }
+      #demo-recorder-detail .brain-proof-row span { max-width:100%; overflow:visible; padding:5px 7px; border-color:rgba(179,154,255,.23); color:#d2caff; background:rgba(179,154,255,.07); font-size:10px; text-overflow:clip; white-space:normal; }
+      #demo-recorder-detail .brain-evidence { border-color:rgba(85,228,170,.24); border-radius:9px; background:rgba(85,228,170,.035); }
+      #demo-recorder-detail .brain-evidence summary { padding:9px 11px; }
+      #demo-recorder-detail .brain-evidence summary strong { font-size:13px; }
+      #demo-recorder-detail .brain-evidence summary small { font-size:10px; }
+      #demo-recorder-detail .brain-evidence div { gap:6px; padding:10px 11px; color:#c8d8de; font-size:12px; line-height:1.45; }
     `;
     document.head.append(style);
     const backdrop = document.createElement("div");
@@ -398,7 +431,12 @@ async function injectDemoOverlay(page) {
     const caption = document.createElement("div");
     caption.id = "demo-recorder-caption";
     caption.setAttribute("aria-hidden", "true");
-    document.body.append(backdrop, cursor, scene, focus, caption);
+    const detailShade = document.createElement("div");
+    detailShade.id = "demo-recorder-detail-shade";
+    const detail = document.createElement("section");
+    detail.id = "demo-recorder-detail";
+    detail.setAttribute("aria-hidden", "true");
+    document.body.append(backdrop, detailShade, detail, cursor, scene, focus, caption);
   });
 }
 
@@ -407,6 +445,43 @@ async function setSceneLabel(page, title) {
 }
 async function setCursorVisible(page, visible) {
   await page.evaluate((show) => { const cursor = document.getElementById("demo-recorder-cursor"); if (cursor) cursor.style.opacity = show ? "1" : "0"; }, visible);
+}
+async function showCompanyBrainDetail(page) {
+  const shown = await page.evaluate(() => {
+    const source = document.querySelector("#brain-answer .brain-response");
+    const detail = document.getElementById("demo-recorder-detail");
+    const shade = document.getElementById("demo-recorder-detail-shade");
+    if (!source || !detail || !shade) return false;
+    const answer = source.cloneNode(true);
+    answer.querySelectorAll("details").forEach((item) => { item.open = false; });
+    detail.replaceChildren();
+    const header = document.querySelector(".brain-card > header")?.cloneNode(true) || document.createElement("header");
+    header.classList.add("demo-detail-header");
+    const kicker = header.querySelector("small");
+    if (kicker) kicker.textContent = "FALKORDB COMPANY BRAIN";
+    const status = header.querySelector(".brain-status");
+    if (status) status.lastChild.textContent = " graph answer";
+    detail.append(header, answer);
+    detail.scrollTop = 0;
+    detail.setAttribute("aria-hidden", "false");
+    shade.classList.add("visible");
+    detail.classList.add("visible");
+    return true;
+  });
+  assert(shown, "Company Brain detail requires a rendered graph answer");
+  await page.waitForTimeout(300);
+}
+async function hideCompanyBrainDetail(page, waitMs = 220) {
+  await page.evaluate(() => {
+    const detail = document.getElementById("demo-recorder-detail");
+    const shade = document.getElementById("demo-recorder-detail-shade");
+    if (detail) {
+      detail.classList.remove("visible");
+      detail.setAttribute("aria-hidden", "true");
+    }
+    shade?.classList.remove("visible");
+  });
+  if (waitMs) await page.waitForTimeout(waitMs);
 }
 async function resetCamera(page, waitMs = 360) {
   await page.evaluate(() => {
@@ -1003,6 +1078,7 @@ async function recordCandidate(chromium, options) {
     await screencast.start();
 
     async function runScene(scene, action) {
+      await hideCompanyBrainDetail(page, 0);
       await setSceneLabel(page, scene.title);
       const started = Date.now();
       await startSceneCaptions(page, scene);
@@ -1261,15 +1337,22 @@ async function recordCandidate(chromium, options) {
           : { zoom: 1.13, spotlight: true, waitMs: 250 });
       } else await focusCamera(page, UI.outcome, { zoom: 1.14, spotlight: true, waitMs: 250 });
       if (options.syncProfile === "founder") {
+        await atAudio("memoryStored");
+        await demoClick(page, "#memory-stage .memory-row > summary", { pointMs: 100 });
+        for (const cue of ["event", "rotation", "resources", "policy"]) {
+          await atAudio(cue);
+          await pointTo(page, `#memory-stage [data-memory-context="${cue}"]`, 160);
+        }
+        await atAudio("contextSentence");
+        await pointTo(page, "#memory-stage .memory-context-path", 180);
         await atAudio("contextMatch");
-        await pointTo(page, "#memory-stage .memory-row", 220).catch(() => pointTo(page, "#memory-stage", 220));
+        await pointTo(page, "#memory-stage .memory-row summary em", 180).catch(() => pointTo(page, "#memory-stage", 180));
         await atAudio("operatorAsks");
       } else await at(10);
       const close = page.locator("#proof-close").first();
       if (await close.count() && await close.isVisible()) await close.click();
-      await focusCamera(page, ".brain-card", options.syncProfile === "founder"
-        ? founderCamera({ zoom: 1.13, spotlight: true })
-        : { zoom: 1.13, spotlight: true, waitMs: 250 });
+      if (options.syncProfile === "founder") await resetCamera(page, 80);
+      else await focusCamera(page, ".brain-card", { zoom: 1.13, spotlight: true, waitMs: 250 });
       const question = "Who owns the current gate reassignment policy?";
       const responsePromise = options.syncProfile === "founder"
         ? page.waitForResponse((response) => response.url().includes("/api/company-brain") && response.request().method() === "POST", { timeout: 30_000 })
@@ -1280,12 +1363,15 @@ async function recordCandidate(chromium, options) {
       assert(answer.answer_type === "OWNERSHIP_AND_AUTHORITY", "Operations Brain must return ownership and authority");
       assert(list(answer.evidence_ids).length >= 4 && list(answer.graph_path).length >= 3, "Operations Brain answer must include graph evidence and path");
       if (options.syncProfile === "founder") {
+        await showCompanyBrainDetail(page);
         await atAudio("companyBrain");
-        await pointTo(page, "#brain-answer .brain-proof-row", 220);
+        await pointTo(page, "#demo-recorder-detail .brain-proof-row", 220);
         await atAudio("evidence");
-        const citation = page.locator("#brain-answer .brain-evidence summary").first();
-        if (await citation.count()) await citation.click();
-        await focusCamera(page, "#brain-answer .brain-response", founderCamera({ zoom: 1.13, spotlight: true, padding: 8 }));
+        const citation = page.locator("#demo-recorder-detail .brain-evidence summary").first();
+        if (await citation.count()) await demoClick(page, "#demo-recorder-detail .brain-evidence summary", { pointMs: 100 });
+        await pointTo(page, "#demo-recorder-detail .brain-evidence div", 180).catch(() => {});
+        await atAudio(20.5);
+        await hideCompanyBrainDetail(page, 220);
       } else await pointTo(page, "#brain-answer .brain-response", 800);
       await setCursorVisible(page, false);
     });
