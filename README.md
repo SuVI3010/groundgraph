@@ -16,7 +16,7 @@ GroundGraph enters all three 2026 FalkorDB GraphRAG Hackathon tracks:
 
 The [recording manifest](demo/groundgraph-demo.manifest.json) records the source commit, runtime health, scene timings, media properties, and SHA-256 checksum for the downloadable [demo artifact](demo/groundgraph-demo.mp4).
 
-**[Read the GroundGraph story](docs/blog-post.md)** — why we moved beyond another coding assistant, followed one airport delay, and built a shared graph brain for coordinated recovery.
+**[Read the GroundGraph story](https://suvi3010.github.io/groundgraph/blog-post.html)** — why we moved beyond another coding assistant, followed one airport delay, and built a shared graph brain for coordinated recovery.
 
 This repository contains the complete implementation for the [FalkorDB GraphRAG Hackathon](https://www.wemakedevs.org/hackathons/falkordb).
 
