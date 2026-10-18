@@ -16,7 +16,7 @@ Target final length: **2:50–3:00**. Record each numbered section as a separate
 
 **Picture:** Begin on the presenter at eye level. Show a small name and `GroundGraph` lower third after two seconds. At “A late bag,” cut directly to the moving ORD airport view while the same voice continues.
 
-> An airport delay rarely stays one delay. [pause 0.4 seconds] A late bag can hold a departure, block a gate, and affect the next flight. [pause 0.5 seconds] I'm Viswesh Suri, and I built GroundGraph with Sai Pranav to see that chain and help teams respond before it spreads. [tail 0.3 seconds]
+> An airport delay rarely stays one delay. [pause 0.4 seconds] A late bag can hold a departure, block a gate, and affect the next flight. [pause 0.5 seconds] I'm Viswesh Suri, and together with Sai Pranav, I built GroundGraph to see that chain and help teams respond before it spreads. [tail 0.3 seconds]
 
 ## 01-why-now.wav · disruption trigger · 0:18–0:36
 
@@ -34,7 +34,7 @@ Target final length: **2:50–3:00**. Record each numbered section as a separate
 
 **Picture:** Show **Compared** at the first word. Reveal all three plan cards when “three recovery options” is spoken. Switch to **Qwen** on “It can choose only,” then finish on the selected safe ID and its causal graph path.
 
-> GroundGraph creates three recovery options from those connections. [pause 0.4 seconds] Local Qwen cannot invent an action. [pause 0.35 seconds] It can choose only from the safe shortlist already checked against the graph. [pause 0.55 seconds] The highlighted option stays inside that boundary, and its causal path explains why it fits this disruption. [tail 0.4 seconds]
+> GroundGraph creates three recovery options from those connections. [pause 0.4 seconds] Local Qwen cannot invent an action. [pause 0.35 seconds] It can only choose from the safe shortlist already checked against the graph. [pause 0.55 seconds] The highlighted option stays inside that boundary, and its causal path explains why it fits this disruption. [tail 0.4 seconds]
 
 ## 04-apply.wav · guards and result · 1:14–1:34
 
@@ -64,7 +64,7 @@ Target final length: **2:50–3:00**. Record each numbered section as a separate
 
 **Picture:** Begin on the shared graph and agent handoffs while “shared brain” and “connects” are spoken. On “We then replayed,” flash the completed July 27 scorecard, then move to the 30-day card. Keep the exact counts visible on screen instead of reading them aloud. Animate `34.92 → 19.07 min` as the comparison is spoken, then hold it for the 0.8-second pause. At “It shows,” cut back to the same presenter framing used in the opening. End with the repository URL beside the presenter.
 
-> FalkorDB is GroundGraph’s shared brain. [pause 0.35 seconds] It connects airport state, agent handoffs, memory, and evidence across all three tracks. [pause 0.4 seconds] We then replayed thirty days at O’Hare, hour by hour, giving the forecast only the information available at that moment. [pause 0.45 seconds] Average prediction error fell from about thirty-five minutes using the schedule alone to nineteen with GroundGraph. [hold on comparison 0.8 seconds] It shows the full loop: understand the disruption, coordinate a safe response, explain it, and learn. [pause 0.3 seconds] That’s GroundGraph. [tail 0.5 seconds]
+> FalkorDB is GroundGraph’s shared brain. [pause 0.35 seconds] It connects airport state, agent handoffs, memory, and evidence across all three tracks. [pause 0.4 seconds] We replayed thirty days at O’Hare, hour by hour, giving the forecast only the information available at that moment. [pause 0.45 seconds] Average prediction error fell from about thirty-five minutes using the schedule alone to nineteen with GroundGraph. [hold on comparison 0.8 seconds] It shows the full loop. Understand the disruption. Coordinate a safe response. Explain it and learn. [pause 0.3 seconds] That’s GroundGraph. [tail 0.5 seconds]
 
 ## Face footage
 

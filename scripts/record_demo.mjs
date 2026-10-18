@@ -61,7 +61,7 @@ const FOUNDER_SYNC = Object.freeze({
   },
   close: {
     referenceDuration: 38.584,
-    captionStarts: [0, 3.52, 10.59, 20.04, 28.46, 36.44],
+    captionStarts: [0, 3.52, 10.59, 20.04, 28.46, 31.36, 32.74, 34.80, 36.78],
     cues: { handoffs: 3.52, realDay: 10.59, cutoff: 14.88, benchmark: 20.04, baseline: 22.90, groundgraph: 25.96, faceCut: 28.46 },
     editorCuts: { productToFace: 28.46, eyeContactTail: 38.58 },
   },
