@@ -2,7 +2,7 @@
 
 ## Repository and setup
 
-- [x] Public repository URL is added to the README and submission form.
+- [ ] Repository visibility is changed from private to public and verified while signed out.
 - [x] Event-period repository is separate from the pre-event exploration prototype.
 - [x] Python dependency versions and judged server/model tags are recorded.
 - [x] `make audit` checks package completeness, scenario/knowledge hashes, action contracts, and local documentation links offline.
@@ -40,7 +40,8 @@
 
 ## Demo assets
 
-- [x] Final 2:40 video was recorded from hardened source commit `3348d4d` with the simplified decision story and multi-airport replay.
+- [x] Existing 2:40 fallback video was recorded from hardened source commit `3348d4d` with the simplified decision story and multi-airport replay.
+- [ ] Final video is refreshed from current HEAD to show the real-day interface and 30-day benchmark.
 - [x] Audio is intelligible at normal volume and media QA records its levels.
 - [x] The first 30 seconds show the problem, product, and provenance boundary.
 - [x] The recording includes one model/fallback badge with truthful narration.
@@ -48,16 +49,16 @@
 - [x] Track 2 shows six parallel specialist findings, a genuine no-action replan, contextual memory, and preservation of the applied ORD episode after switching airport graphs.
 - [x] Track 3 shows a question-routed Operations Brain ownership answer with its connected procedure and evidence path.
 - [x] The video uses supervised manual approval; guarded auto-application remains available in the UI and is covered by server tests.
-- [x] Video link works in a signed-out browser.
-- [x] Screenshot/thumbnail uses the final interface.
+- [ ] Final YouTube video is public or unlisted and works while signed out.
+- [ ] Screenshot/thumbnail is refreshed from the current interface.
 
 ## Submission form
 
 - [x] Product name: `GroundGraph`.
 - [x] Tracks: `Agents That Act on Connected Data`, `Agent Memory and Coordination`, `Company Brain`.
-- [x] Repository URL: [github.com/SuVI3010/groundgraph](https://github.com/SuVI3010/groundgraph).
-- [x] Demo asset: [groundgraph-demo.mp4](https://github.com/SuVI3010/groundgraph/blob/main/demo/groundgraph-demo.mp4).
-- [x] Complete local setup path: `docs/local-setup.md`.
+- [ ] Public repository URL: [github.com/SuVI3010/groundgraph](https://github.com/SuVI3010/groundgraph).
+- [ ] Public or unlisted YouTube demo URL is added to the form.
+- [x] Complete local setup path is documented in `docs/local-setup.md`.
 - [ ] Team members and roles are correct.
 - [ ] Every team member is registered on only this team and can explain the graph model, key Cypher, architecture, model boundary, and data provenance.
 - [ ] Team ownership of event-period code and assets is agreed.
