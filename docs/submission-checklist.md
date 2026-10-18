@@ -2,7 +2,7 @@
 
 ## Repository and setup
 
-- [ ] Repository visibility is changed from private to public and verified while signed out.
+- [x] Repository visibility is public; the repository, raw README, and ranged demo-video request were verified anonymously.
 - [x] Event-period repository is separate from the pre-event exploration prototype.
 - [x] Python dependency versions and judged server/model tags are recorded.
 - [x] `make audit` checks package completeness, scenario/knowledge hashes, action contracts, and local documentation links offline.
@@ -56,7 +56,7 @@
 
 - [x] Product name: `GroundGraph`.
 - [x] Tracks: `Agents That Act on Connected Data`, `Agent Memory and Coordination`, `Company Brain`.
-- [ ] Public repository URL: [github.com/SuVI3010/groundgraph](https://github.com/SuVI3010/groundgraph).
+- [x] Public repository URL: [github.com/SuVI3010/groundgraph](https://github.com/SuVI3010/groundgraph).
 - [ ] Public or unlisted YouTube demo URL is added to the form.
 - [x] Complete local setup path is documented in `docs/local-setup.md`.
 - [ ] Team members and roles are correct.
