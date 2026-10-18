@@ -41,7 +41,7 @@
 ## Demo assets
 
 - [x] Existing 2:40 fallback video was recorded from hardened source commit `3348d4d` with the simplified decision story and multi-airport replay.
-- [ ] Final video is refreshed from current HEAD to show the real-day interface and 30-day benchmark.
+- [x] Final founder-led video is refreshed from source commit `365c33f` and shows the real-day interface and 30-day benchmark.
 - [x] Audio is intelligible at normal volume and media QA records its levels.
 - [x] The first 30 seconds show the problem, product, and provenance boundary.
 - [x] The recording includes one model/fallback badge with truthful narration.
@@ -50,7 +50,7 @@
 - [x] Track 3 shows a question-routed Operations Brain ownership answer with its connected procedure and evidence path.
 - [x] The video uses supervised manual approval; guarded auto-application remains available in the UI and is covered by server tests.
 - [ ] Final YouTube video is public or unlisted and works while signed out.
-- [ ] Screenshot/thumbnail is refreshed from the current interface.
+- [x] Screenshot/thumbnail is refreshed with the six-agent FalkorDB handoff proof.
 
 ## Submission form
 
