@@ -1,6 +1,8 @@
 # GroundGraph
 
-**A graph-native airport operations recovery command center.** GroundGraph switches between bounded historical-demand replays for Chicago O'Hare, Atlanta, and San Francisco. For every decision it runs six specialist Cypher reads against FalkorDB, builds materially different recovery strategies from the connected state, lets a local model compare only server-approved safe candidates, applies plans under current synthetic policy, and recalls modeled outcomes only when the disruption context matches.
+**Airport recovery through connected agents.** One delayed bag can hold a departure, block a gate, and affect the aircraft's next flight. GroundGraph follows that connected chain so six specialist agents can coordinate a bounded response, explain it, and remember the outcome.
+
+FalkorDB is the system's shared operational state, coordination layer, policy authority, evidence trail, and contextual memory. A local Qwen model may select only from recovery plans that the graph and deterministic safety checks have already approved.
 
 GroundGraph enters all three 2026 FalkorDB GraphRAG Hackathon tracks:
 
@@ -8,15 +10,15 @@ GroundGraph enters all three 2026 FalkorDB GraphRAG Hackathon tracks:
 2. **Agent Memory and Coordination**
 3. **Company Brain**
 
-[![GroundGraph demo: explainable airport recovery](demo/groundgraph-demo-cover.jpg)](demo/groundgraph-demo.mp4)
+[![GroundGraph demo: explainable airport recovery](demo/groundgraph-demo-cover.jpg)](https://youtu.be/Cc0sYNm7V-0)
 
-**[Watch the GroundGraph demo](demo/groundgraph-demo.mp4)** — full FalkorDB server through Podman, local Qwen selection, graph-coordinated specialists, guarded application, persistent memory, and live policy supersession.
+**[Watch the three-minute working demo](https://youtu.be/Cc0sYNm7V-0)** — six graph-coordinated specialists, bounded local Qwen selection, guarded application, persistent memory, and cited Company Brain answers.
 
-The [recording manifest](demo/groundgraph-demo.manifest.json) records the source commit, runtime health, scene timings, media properties, and SHA-256 checksum for the packaged demo.
+The [recording manifest](demo/groundgraph-demo.manifest.json) records the source commit, runtime health, scene timings, media properties, and SHA-256 checksum for the downloadable [demo artifact](demo/groundgraph-demo.mp4).
 
 **[Read the GroundGraph story](docs/blog-post.md)** — why we moved beyond another coding assistant, followed one airport delay, and built a shared graph brain for coordinated recovery.
 
-This repository is the event-period implementation for the [FalkorDB GraphRAG Hackathon](https://www.wemakedevs.org/hackathons/falkordb) and follows its [submission rules](https://www.wemakedevs.org/hackathons/falkordb/rules).
+This repository contains the complete implementation for the [FalkorDB GraphRAG Hackathon](https://www.wemakedevs.org/hackathons/falkordb).
 
 The project is an airport-operations research replay. It does not issue air-traffic-control clearances, connect to live airport systems, or claim measured historical savings.
 
@@ -107,7 +109,7 @@ RETURN event.id, flight.id, next_leg.id, episode.id, plan.id,
 2. The coordinator re-reads all six handoffs and connected impact paths, constructs graph-valid candidates, and gives Qwen only the allowlisted shortlist.
 3. Before any mutation, the server re-queries the current version, required relationships, and policy authority as part of seven guards; a mismatch blocks application, while success writes the outcome and contextual memory back to FalkorDB.
 
-In the judged server mode, loss of FalkorDB returns a structured `503 GRAPH_UNAVAILABLE`, freezes the replay, disables operational controls, and marks the interface read-only. Replanning, policy authorization, handoffs, and memory cannot continue, and there is no secondary operational database that can silently replace it. After FalkorDB is restored, the health pulse reloads genuine graph state before re-enabling controls.
+In full-server mode, loss of FalkorDB returns a structured `503 GRAPH_UNAVAILABLE`, freezes the replay, disables operational controls, and marks the interface read-only. Replanning, policy authorization, handoffs, and memory cannot continue, and there is no secondary operational database that can silently replace it. After FalkorDB is restored, the health pulse reloads genuine graph state before re-enabling controls.
 
 ## Three-track proof
 
@@ -139,7 +141,7 @@ flowchart LR
     DS --> UI
 ```
 
-The judged path runs the full official `docker.io/falkordb/falkordb:6.0.0` server locally through Podman. On macOS, the bootstrap creates an AppleHV Podman machine when no machine exists, so the judged path does not require Docker Desktop or Colima. The submission video, screenshots, and verification use `runtime_mode: server`. FalkorDBLite is available only as a non-judged development fallback.
+The recommended runtime uses the official `docker.io/falkordb/falkordb:6.0.0` server locally through Podman. On macOS, the bootstrap creates an AppleHV Podman machine when no machine exists, so it does not require Docker Desktop or Colima. The submission video, screenshots, and verification use `runtime_mode: server`. FalkorDBLite remains available as a development fallback.
 
 After the container image, Python packages, and Ollama model are installed, the checked-in replay runs locally without calling external data or model APIs.
 
@@ -168,7 +170,7 @@ On macOS, `make start` creates an AppleHV-backed Podman machine when none exists
 
 On Linux, install the same prerequisites with your distribution's package manager; Podman normally runs natively there, so `make start` uses it without creating a virtual machine.
 
-Verify the judged runtime from another terminal:
+Verify the full-server runtime from another terminal:
 
 ```bash
 make verify
@@ -183,7 +185,7 @@ Complete setup and troubleshooting instructions are in [Local setup](docs/local-
 
 ```bash
 make start          # official FalkorDB through Podman + local app
-make start-lite     # non-judged development fallback
+make start-lite     # development fallback
 make verify         # read-only API/database/model checks
 make demo-check     # strict official-image + live-model readiness check
 make audit          # offline package, provenance, and documentation checks
@@ -194,14 +196,14 @@ make down           # stop the database container
 
 Runtime configuration lives in [`.env.example`](.env.example). Defaults enable local Qwen and policy-authorized bounded autopilot. Set `GROUNDGRAPH_AUTO_APPLY=0` for supervised click-to-apply mode or `GROUNDGRAPH_ENABLE_LLM=0` to exercise the labeled deterministic path.
 
-`make setup` installs only the judged full-server dependencies. FalkorDBLite and pytest are isolated in optional dependency files and are installed automatically when `make start-lite` or `make test` needs them. The repository intentionally uses a direct Podman command for FalkorDB and a host-local Flask process; no Compose provider, Docker Desktop, or Colima is part of the supported path.
+`make setup` installs only the full-server dependencies. FalkorDBLite and pytest are isolated in optional dependency files and are installed automatically when `make start-lite` or `make test` needs them. The repository intentionally uses a direct Podman command for FalkorDB and a host-local Flask process; no Compose provider, Docker Desktop, or Colima is part of the supported path.
 
 ## API surface
 
 | Method | Endpoint | Purpose |
 |---|---|---|
 | `GET` | `/api/health` | Runtime mode, graph counts, state version, model configuration. |
-| `GET` | `/api/snapshot` | Complete judge-facing replay projection. |
+| `GET` | `/api/snapshot` | Complete replay projection. |
 | `GET` | `/api/decision-story` | One complete trigger-to-outcome explanation, optionally selected by `episode_id`. |
 | `GET` | `/api/airports` | Airport selector metadata and truth-boundary notes for ORD, ATL, and SFO. |
 | `POST` | `/api/airports/select` | Activate an airport replay by code and return its graph snapshot. |
@@ -237,7 +239,7 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 | `analysis/ord-july-2026-benchmark/` | Machine-readable 30-day benchmark, per-day metrics, hourly results, and independent weather-source check. |
 | `knowledge/` | Versioned synthetic SOP, incident, shift handoff, teams, roles, and import manifest. |
 | `cypher/` | Essential track-defining graph queries. |
-| `docs/` | Architecture, graph model, setup, track evidence, demo, disclosure, and checklist. |
+| `docs/` | Architecture, graph model, setup, track evidence, benchmarks, disclosure, and project story. |
 | `scripts/` | Podman/FalkorDB startup and read-only release verification. |
 
 ## Evidence and disclosure
@@ -248,8 +250,15 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 - [ORD real-day factual shadow test](docs/real-day-backtest.md)
 - [ORD multi-day factual benchmark](docs/multiday-benchmark.md)
 - [AI use disclosure](docs/ai-disclosure.md)
-- [Judge demo script](docs/demo-script.md)
-- [Submission copy](docs/submission-copy.md)
-- [Submission checklist](docs/submission-checklist.md)
+- [Project story](docs/blog-post.md)
 
-OpenAI Codex assisted development and documentation. The product coordinator is a separate local Qwen runtime constrained to the server-generated `model_candidate_set`. Full details are in the disclosure above.
+## Team
+
+- **Viswesh Suri**
+- **Sai Pranav**
+
+GroundGraph was built for Graph Hacks 2026. OpenAI Codex assisted development and documentation; the product coordinator is a separate local Qwen runtime constrained to the server-generated `model_candidate_set`. See the [AI use disclosure](docs/ai-disclosure.md) for the complete boundary.
+
+## License
+
+Released under the [MIT License](LICENSE).

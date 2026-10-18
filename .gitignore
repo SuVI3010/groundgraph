@@ -8,10 +8,9 @@ __pycache__/
 .data/
 .artifacts/
 
-# Local founder source takes and review renders. The promoted demo remains tracked.
-/demo/[1-8].mov
-/demo/[1-8].m4a
-/demo/missed.m4a
-/demo/groundgraph-founder-*.mp4
-/demo/groundgraph-founder-*.jpg
-/demo/groundgraph-founder-*.json
+# Local media inputs and intermediate review renders. The promoted demo remains tracked.
+/demo/*.mov
+/demo/*.m4a
+/demo/*candidate*.mp4
+/demo/*candidate*.jpg
+/demo/*candidate*.json

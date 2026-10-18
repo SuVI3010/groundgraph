@@ -53,7 +53,7 @@ make verify
 make demo-check
 ```
 
-A judged server run must report the API, matching graph and endpoint, graph module, local model, official container image, and a live structured model inference:
+A full-server run must report the API, matching graph and endpoint, graph module, local model, official container image, and a live structured model inference:
 
 ```text
 PASS GroundGraph API http://127.0.0.1:5050/api/health
@@ -61,7 +61,7 @@ PASS FalkorDB server 127.0.0.1:6379/groundgraph contains ... nodes and the graph
 PASS Ollama model qwen3:4b-instruct
 PASS official FalkorDB container image docker.io/falkordb/falkordb:6.0.0
 PASS live structured Ollama inference with qwen3:4b-instruct
-PASS GroundGraph judged demo is ready
+PASS GroundGraph full-server demo is ready
 ```
 
 You can also inspect the runtime proof directly:
@@ -76,7 +76,7 @@ If ports 5050, 6379, or 3000 are already occupied, edit `PORT`, `FALKORDB_PORT`,
 
 After the FalkorDB image, Python wheels, and Ollama model have been pulled once, the replay uses only checked-in data and local services.
 
-## Non-judged development fallback and maintenance
+## Development fallback and maintenance
 
 Run without a container engine:
 
@@ -84,9 +84,9 @@ Run without a container engine:
 make start-lite
 ```
 
-This uses FalkorDBLite and remains fully local. It is provided only for development when the full server cannot run; do not use it for submission screenshots, the demo video, or judged-runtime claims. On macOS, install its OpenMP runtime once with `brew install libomp`.
+This uses FalkorDBLite and remains fully local. It is provided for local development when the full server cannot run; release evidence uses the official server. On macOS, install its OpenMP runtime once with `brew install libomp`.
 
-`make setup` installs only Flask and the official FalkorDB client required by the judged path. `make start-lite` installs the optional Lite dependency when needed, while `make test` installs the optional Lite and pytest dependencies when needed. You can preinstall all development dependencies with `make setup-dev`.
+`make setup` installs only Flask and the official FalkorDB client required by the full-server path. `make start-lite` installs the optional Lite dependency when needed, while `make test` installs the optional Lite and pytest dependencies when needed. You can preinstall all development dependencies with `make setup-dev`.
 
 Useful commands:
 

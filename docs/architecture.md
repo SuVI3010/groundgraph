@@ -39,7 +39,7 @@ flowchart LR
 
 ## Runtime boundary
 
-The judged path uses the official `docker.io/falkordb/falkordb:6.0.0` image through Podman. On macOS, if no Podman machine exists, `make start` creates one with the AppleHV provider; it does not require Docker Desktop or Colima. If a machine already exists, the script starts the machine selected by Podman's default connection. The command validates the container image and loopback ports, requires both Redis `PONG` and the FalkorDB graph module, and then launches the Python application in `FALKORDB_MODE=server`.
+The full-server path uses the official `docker.io/falkordb/falkordb:6.0.0` image through Podman. On macOS, if no Podman machine exists, `make start` creates one with the AppleHV provider; it does not require Docker Desktop or Colima. If a machine already exists, the script starts the machine selected by Podman's default connection. The command validates the container image and loopback ports, requires both Redis `PONG` and the FalkorDB graph module, and then launches the Python application in `FALKORDB_MODE=server`.
 
 `make start-lite` is an explicit offline fallback built on FalkorDBLite. The API returns `runtime_mode`; screenshots and the demo should claim the official server only when `/api/health` returns `"runtime_mode": "server"`.
 

@@ -29,12 +29,9 @@ REQUIRED_PATHS = (
     "docs/data-provenance.md",
     "docs/ai-disclosure.md",
     "docs/track-coverage.md",
-    "docs/demo-script.md",
-    "docs/submission-checklist.md",
     "demo/groundgraph-demo.mp4",
     "demo/groundgraph-demo-cover.jpg",
     "demo/groundgraph-demo.manifest.json",
-    "demo/narration-scenes.json",
     "cypher/01_connected_impact_path.cypher",
     "cypher/02_agent_handoffs.cypher",
     "cypher/06_company_brain.cypher",
@@ -172,7 +169,6 @@ def demo_manifest_errors() -> list[str]:
 
 def main() -> int:
     errors: list[str] = []
-    warnings: list[str] = []
 
     for relative in REQUIRED_PATHS:
         if not (ROOT / relative).exists():
@@ -223,23 +219,12 @@ def main() -> int:
     }
     for expected in expected_defaults:
         if expected not in env_text:
-            errors.append(f"missing judged-runtime default: {expected}")
+            errors.append(f"missing full-server runtime default: {expected}")
 
-    judged_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    if "FalkorDBLite" in judged_requirements or "pytest" in judged_requirements:
-        errors.append("judged requirements include optional Lite/test dependencies")
+    server_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    if "FalkorDBLite" in server_requirements or "pytest" in server_requirements:
+        errors.append("full-server requirements include optional Lite/test dependencies")
 
-    submission_text = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (ROOT / "README.md", ROOT / "docs/submission-copy.md", ROOT / "docs/submission-checklist.md")
-    )
-    if "<PUBLIC_REPOSITORY_URL>" in submission_text or "<ADD URL>" in submission_text:
-        warnings.append("public repository URL still needs to be inserted")
-    if "<DEMO_VIDEO_URL>" in submission_text or "<ADD URL>" in submission_text:
-        warnings.append("demo video URL still needs to be inserted")
-
-    for warning in dict.fromkeys(warnings):
-        print(f"WARN {warning}")
     if errors:
         for error in errors:
             print(f"FAIL {error}", file=sys.stderr)
@@ -251,7 +236,7 @@ def main() -> int:
     print("PASS knowledge flight references match the scenario")
     print("PASS local Markdown links resolve")
     print("PASS final demo checksum, source commit, runtime evidence, scenes, and media QA")
-    print("PASS judged-runtime defaults select FalkorDB server, local Qwen, and bounded autopilot")
+    print("PASS full-server defaults select FalkorDB server, local Qwen, and bounded autopilot")
     return 0
 
 

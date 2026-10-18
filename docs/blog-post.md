@@ -2,9 +2,11 @@
 
 *We followed one airport delay instead—and found a problem built for graphs.*
 
-[![GroundGraph showing a connected airport recovery](../demo/groundgraph-demo-cover.jpg)](../demo/groundgraph-demo.mp4)
+*By Viswesh Suri and Sai Pranav · Graph Hacks 2026*
 
-**[Watch the three-minute working demo](../demo/groundgraph-demo.mp4).**
+[![GroundGraph showing a connected airport recovery](../demo/groundgraph-demo-cover.jpg)](https://youtu.be/Cc0sYNm7V-0)
+
+**[Watch the three-minute working demo](https://youtu.be/Cc0sYNm7V-0).**
 
 At the start of Graph Hacks, the safest idea was obvious: build another assistant for developers.
 
@@ -88,3 +90,5 @@ Its agents act on connected airport data. They coordinate through versioned find
 We began by looking beyond another software assistant. We ended with a graph-native framework in which agents can understand a disruption, coordinate a bounded response, explain it, and learn from the outcome.
 
 Airports run on relationships. With FalkorDB, GroundGraph can reason through them.
+
+**[Explore the source code, graph model, and reproducible benchmark](https://github.com/SuVI3010/groundgraph).**

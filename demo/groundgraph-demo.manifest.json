@@ -229,17 +229,6 @@
   "frame_count": 5379,
   "edited_at": "2026-10-18T16:12:17.924567+00:00",
   "source_commit": "910e8a03d798b96507c5a60362f6f3ce787f48af",
-  "source_candidate": "demo/groundgraph-founder-screen-candidate.mp4",
-  "source_candidate_sha256": "fa8418e6e5cdab711c8e8065366779bbf9f0dc5349336be384175d6028c3bd41",
-  "source_manifest": "demo/groundgraph-founder-screen-candidate.manifest.json",
-  "founder_media": {
-    "opening": "demo/1.mov",
-    "closing": "demo/8.mov",
-    "source_policy": "local untracked founder recordings; final edit is the published artifact",
-    "face_to_product_seconds": 3.8,
-    "product_to_face_seconds": 168.361,
-    "close_scene_start_seconds": 140.314
-  },
   "cover": "demo/groundgraph-demo-cover.jpg",
   "cover_sha256": "8e2ba62bc7100289c6d2f693bdbf3d3ddaf384a14191f98ec4cd2868db965ae1",
   "audio_stream_sha256": "c10efefe928241d73ebc43f10e49cbbef0aec6368414373acc7e865ba6e75dbc",
@@ -267,5 +256,11 @@
       "longest_seconds": 1.581,
       "result": "scene transitions only"
     }
+  },
+  "publication": {
+    "youtube_url": "https://youtu.be/Cc0sYNm7V-0",
+    "visibility": "unlisted",
+    "published_at": "2026-10-18",
+    "captions": "English (India)"
   }
 }

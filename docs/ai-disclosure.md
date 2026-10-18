@@ -22,7 +22,7 @@ The submission uses these external runtime and development components:
 |---|---|---|
 | [FalkorDB server](https://github.com/FalkorDB/FalkorDB) | `docker.io/falkordb/falkordb:6.0.0` | Judged property-graph runtime and FalkorDB Browser. |
 | [FalkorDB Python client](https://pypi.org/project/FalkorDB/) | `1.7.1` | Application access to the official server. |
-| [FalkorDBLite](https://github.com/FalkorDB/falkordblite) | `0.10.0` | Non-judged development fallback; not used in submission evidence. |
+| [FalkorDBLite](https://github.com/FalkorDB/falkordblite) | `0.10.0` | Development fallback; release evidence uses the official FalkorDB server. |
 | [Flask](https://flask.palletsprojects.com/) | `3.1.3` | Local HTTP API and static interface. |
 | [Ollama](https://ollama.com/) | locally installed | Local model runtime. |
 | [Qwen3 4B Instruct](https://ollama.com/library/qwen3:4b-instruct) | `qwen3:4b-instruct` | Bounded candidate selection and explanation. |

@@ -34,7 +34,7 @@ GroundGraph enters all three official tracks as one product. The airport selecto
 
 ## FalkorDB centrality
 
-The judged runtime uses the full official FalkorDB server through Podman and stores operations, record-level provenance, agent coordination, tool calls, decisions, policy, and memory in FalkorDB. The default graphs are `groundgraph`, `groundgraph_atl`, and `groundgraph_sfo`; only the selected airport's graph drives its Decision Story and controls. On macOS the bootstrap uses Podman AppleHV when it must create a machine. `/api/health` exposes `runtime_mode: server` and graph counts. The FalkorDBLite command is a non-judged development fallback and is not used in submission evidence.
+The full-server runtime uses the full official FalkorDB server through Podman and stores operations, record-level provenance, agent coordination, tool calls, decisions, policy, and memory in FalkorDB. The default graphs are `groundgraph`, `groundgraph_atl`, and `groundgraph_sfo`; only the selected airport's graph drives its Decision Story and controls. On macOS the bootstrap uses Podman AppleHV when it must create a machine. `/api/health` exposes `runtime_mode: server` and graph counts. The FalkorDBLite command is a development fallback and is not used in submission evidence.
 
 ## Independent factual validation
 

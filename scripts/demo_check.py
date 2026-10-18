@@ -1,4 +1,4 @@
-"""Strict, read-only readiness check for the judged GroundGraph demonstration."""
+"""Strict, read-only readiness check for the GroundGraph full-server demonstration."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _check_official_container() -> None:
     )
     if not expected_image.startswith("docker.io/falkordb/falkordb:"):
         raise RuntimeError(
-            f"judged demo requires the official FalkorDB image, got {expected_image!r}"
+            f"full-server demo requires the official FalkorDB image, got {expected_image!r}"
         )
     completed = subprocess.run(
         [
@@ -94,7 +94,7 @@ def _check_live_model() -> None:
 
 def main() -> int:
     if os.getenv("FALKORDB_MODE", "server").lower() != "server":
-        print("FAIL judged demo check requires FALKORDB_MODE=server", file=sys.stderr)
+        print("FAIL full-server demo check requires FALKORDB_MODE=server", file=sys.stderr)
         return 1
     if verify_stack() != 0:
         return 1
@@ -110,9 +110,9 @@ def main() -> int:
         urllib.error.URLError,
         ValueError,
     ) as exc:
-        print(f"FAIL judged demo readiness: {exc}", file=sys.stderr)
+        print(f"FAIL full-server demo readiness: {exc}", file=sys.stderr)
         return 1
-    print("PASS GroundGraph judged demo is ready")
+    print("PASS GroundGraph full-server demo is ready")
     return 0
 
 
