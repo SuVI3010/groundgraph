@@ -14,6 +14,58 @@ const require = createRequire(import.meta.url);
 
 const SCENE_ORDER = ["hook", "why-now", "findings", "options", "apply", "restraint", "memory-knowledge", "airports", "close"];
 const NARRATION_EXTENSIONS = [".wav", ".m4a", ".aiff", ".aif", ".mp3"];
+const FOUNDER_SYNC = Object.freeze({
+  hook: {
+    referenceDuration: 17.139,
+    captionStarts: [0, 3.68, 8.59],
+    cues: { productCut: 3.68 },
+    editorCuts: { faceToProduct: 3.68 },
+  },
+  "why-now": {
+    referenceDuration: 16.980,
+    captionStarts: [0, 3.54, 10.02],
+    cues: { disruption: 9.72 },
+  },
+  findings: {
+    referenceDuration: 17.699,
+    captionStarts: [0, 9.07],
+    cues: {
+      weather: 3.24, flow: 4.10, gate: 4.92, turn: 5.80, policy: 6.86, memory: 8.03,
+      handoffs: 9.07, falkordb: 12.10, coordinator: 13.05,
+    },
+  },
+  options: {
+    referenceDuration: 19.583,
+    captionStarts: [0, 4.58, 7.97, 12.84],
+    cues: { candidates: 1.67, localQwen: 4.58, shortlist: 7.97, selected: 12.84, causalPath: 16.24 },
+  },
+  apply: {
+    referenceDuration: 19.304,
+    captionStarts: [0, 2.10, 9.83, 16.17],
+    cues: { guards: 2.10, resources: 4.38, policy: 5.67, timing: 6.80, benefit: 7.78, apply: 10.95, outcome: 16.17 },
+  },
+  restraint: {
+    referenceDuration: 16.337,
+    captionStarts: [0, 3.80, 10.35],
+    cues: { threshold: 3.80, noAction: 7.06, continuous: 10.35 },
+  },
+  "memory-knowledge": {
+    referenceDuration: 19.575,
+    captionStarts: [0, 6.38, 10.23],
+    cues: { contextMatch: 6.38, operatorAsks: 10.23, companyBrain: 12.66, evidence: 14.34 },
+  },
+  airports: {
+    referenceDuration: 6.055,
+    captionStarts: [0],
+    cues: { atlanta: 3.44, sanFrancisco: 4.62, ordReturn: 5.72 },
+  },
+  close: {
+    referenceDuration: 38.584,
+    captionStarts: [0, 3.52, 10.59, 20.04, 28.46, 36.44],
+    cues: { handoffs: 3.52, realDay: 10.59, cutoff: 14.88, benchmark: 20.04, baseline: 22.90, groundgraph: 25.96, faceCut: 28.46 },
+    editorCuts: { productToFace: 28.46, eyeContactTail: 38.58 },
+  },
+});
 const UI = {
   airportSelector: "#airport-selector, #airport-switcher",
   airportButton: "#airport-switcher, #airport-selector button",
@@ -30,6 +82,15 @@ const UI = {
   primaryAction: "#primary-action",
   jump: "#jump-button",
   play: "#play-button",
+  modeSwitch: "#mode-switch",
+  realDayMode: '#mode-switch [data-mode="real-day"]',
+  recoveryMode: '#mode-switch [data-mode="recovery"]',
+  realScore: "#real-score",
+  realScoreStatus: "#real-score-status",
+  monthProof: ".month-proof",
+  benchmarkBars: ".benchmark-bars",
+  causalPath: "#causal-path",
+  coordination: ".coordination-line",
 };
 
 function parseArgs(argv) {
@@ -39,6 +100,7 @@ function parseArgs(argv) {
     voice: "Daniel",
     rate: "185",
     narrationDir: null,
+    syncProfile: "standard",
     secondaryAirport: "ATL",
     output: path.join(repoRoot, "demo", "groundgraph-demo-candidate.mp4"),
     screenshot: path.join(repoRoot, ".artifacts", "demo-pipeline", "dry-run.png"),
@@ -56,12 +118,15 @@ function parseArgs(argv) {
     else if (argument.startsWith("--voice=")) options.voice = argument.slice("--voice=".length);
     else if (argument.startsWith("--rate=")) options.rate = argument.slice("--rate=".length);
     else if (argument.startsWith("--narration-dir=")) options.narrationDir = path.resolve(repoRoot, argument.slice("--narration-dir=".length));
+    else if (argument.startsWith("--sync-profile=")) options.syncProfile = argument.slice("--sync-profile=".length).toLowerCase();
     else if (argument.startsWith("--secondary-airport=")) options.secondaryAirport = argument.slice("--secondary-airport=".length).toUpperCase();
     else if (argument.startsWith("--output=")) options.output = path.resolve(repoRoot, argument.slice("--output=".length));
     else if (argument.startsWith("--screenshot=")) options.screenshot = path.resolve(repoRoot, argument.slice("--screenshot=".length));
     else if (argument === "--help" || argument === "-h") options.mode = "help";
     else throw new Error(`Unknown argument: ${argument}`);
   }
+  assert(["standard", "founder"].includes(options.syncProfile), `--sync-profile must be standard or founder; received ${options.syncProfile}`);
+  if (options.syncProfile === "founder") assert(options.narrationDir, "--sync-profile=founder requires --narration-dir with canonical 00-hook through 08-close clips");
   return options;
 }
 
@@ -79,6 +144,7 @@ Options:
   --output=demo/groundgraph-demo-candidate.mp4
   --voice=Daniel --rate=185
   --narration-dir=demo/narration-human
+  --sync-profile=founder
   --secondary-airport=ATL
   --screenshot=.artifacts/demo-pipeline/dry-run.png
   --keep-work   Retain captured JPEG frames, subtitles, and intermediate audio.
@@ -87,6 +153,11 @@ Options:
 Use --narration-dir to replace macOS say with one canonical numbered audio
 clip per scene. Run --dry-run with the same directory to validate the clips
 and planned duration without changing replay state.
+
+Use --sync-profile=founder for the separately recorded human script. Its cue
+map synchronizes the disruption, all six specialist reads, Qwen shortlist,
+post-validation apply, real NO_ACTION checkpoint, Company Brain evidence,
+ATL/SFO switch, and completed 30-day benchmark to the spoken phrases.
 
 The recorder refuses to write demo/groundgraph-demo.mp4. It also refuses to
 record unless the UI, FalkorDB state, Qwen allowlist, seven guards, real
@@ -166,17 +237,45 @@ function validateHealth(health) {
   assert(Number(health.agents?.specialist_count) === 6 && health.agents?.execution === "concurrent", "six concurrent specialists must be configured");
 }
 
-function loadScenes() {
+function founderNarration() {
+  const script = fs.readFileSync(path.join(repoRoot, "demo", "human-recording-script.md"), "utf8");
+  const narrationById = new Map();
+  const sectionPattern = /^##\s+(\d{2})-([a-z0-9-]+)\.wav[^\n]*\n([\s\S]*?)(?=^##\s+|(?![\s\S]))/gm;
+  for (const match of script.matchAll(sectionPattern)) {
+    const lines = match[3].split(/\r?\n/)
+      .filter((line) => line.startsWith(">"))
+      .map((line) => line.replace(/^>\s?/, "").trim());
+    const narration = lines.join(" ").replace(/\s*\[[^\]]+\]\s*/g, " ").replace(/\s+/g, " ").trim();
+    if (narration) narrationById.set(match[2], narration);
+  }
+  assert([...narrationById.keys()].join(",") === SCENE_ORDER.join(","), "human recording script must contain canonical 00-hook through 08-close narration sections in order");
+  return narrationById;
+}
+
+function loadScenes(options = {}) {
   const scenes = JSON.parse(fs.readFileSync(path.join(repoRoot, "demo", "narration-scenes.json"), "utf8"));
   assert(Array.isArray(scenes), "narration scenes must be an array");
   assert(scenes.map((scene) => scene.id).join(",") === SCENE_ORDER.join(","), `scene order must be ${SCENE_ORDER.join(", ")}`);
-  const totalWords = scenes.reduce((total, scene) => total + words(scene.narration).length, 0);
+  const founderLines = options.syncProfile === "founder" ? founderNarration() : null;
+  const profiled = scenes.map((scene) => {
+    if (!founderLines) return scene;
+    const sync = FOUNDER_SYNC[scene.id];
+    assert(sync, `founder cue map is missing ${scene.id}`);
+    return {
+      ...scene,
+      narration: founderLines.get(scene.id),
+      founderSync: sync,
+      captionStarts: sync.captionStarts,
+      editorCuts: sync.editorCuts || {},
+    };
+  });
+  const totalWords = profiled.reduce((total, scene) => total + words(scene.narration).length, 0);
   assert(totalWords >= 330 && totalWords <= 380, `narration must be 330–380 words; found ${totalWords}`);
-  for (const scene of scenes) {
+  for (const scene of profiled) {
     assert(scene.title && scene.narration, `${scene.id} needs a title and narration`);
     assert(Number(scene.minimum_seconds) >= 6, `${scene.id} needs minimum_seconds of at least six`);
   }
-  return scenes;
+  return profiled;
 }
 
 function probeDuration(file) {
@@ -187,17 +286,24 @@ function fileSha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-function narrationScene(scene, audio, source) {
+function narrationScene(scene, audio, source, options = {}) {
   assert(fs.statSync(audio).size > 0, `narration clip is empty: ${path.basename(audio)}`);
   const audioDuration = probeDuration(audio);
   assert(Number.isFinite(audioDuration) && audioDuration > 0, `narration clip has no readable duration: ${path.basename(audio)}`);
+  const founder = options.syncProfile === "founder";
+  const narrationLeadSeconds = founder ? 0.12 : 0.65;
+  const narrationTailSeconds = founder ? 0.28 : 0.85;
   return {
     ...scene,
     audio,
     audioDuration,
     audioSource: source,
     audioSha256: fileSha256(audio),
-    minimumDuration: Math.max(Number(scene.minimum_seconds), audioDuration + 1.5),
+    narrationLeadSeconds,
+    narrationTailSeconds,
+    minimumDuration: founder
+      ? audioDuration + narrationLeadSeconds + narrationTailSeconds
+      : Math.max(Number(scene.minimum_seconds), audioDuration + narrationLeadSeconds + narrationTailSeconds),
   };
 }
 
@@ -208,7 +314,7 @@ function validateNarrationTiming(scenes) {
   return plannedMinimum;
 }
 
-function prepareHumanNarration(scenes, narrationDir) {
+function prepareHumanNarration(scenes, narrationDir, options = {}) {
   assert(fs.existsSync(narrationDir) && fs.statSync(narrationDir).isDirectory(), `narration directory does not exist: ${narrationDir}`);
   const prepared = scenes.map((scene, index) => {
     const stem = `${String(index).padStart(2, "0")}-${scene.id}`;
@@ -216,20 +322,20 @@ function prepareHumanNarration(scenes, narrationDir) {
       .map((extension) => path.join(narrationDir, `${stem}${extension}`))
       .filter((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
     assert(matches.length === 1, `${stem} requires exactly one clip with one of these extensions: ${NARRATION_EXTENSIONS.join(", ")}`);
-    return narrationScene(scene, matches[0], "human-files");
+    return narrationScene(scene, matches[0], "human-files", options);
   });
   validateNarrationTiming(prepared);
   return prepared;
 }
 
 function prepareNarration(scenes, directory, options) {
-  if (options.narrationDir) return prepareHumanNarration(scenes, options.narrationDir);
+  if (options.narrationDir) return prepareHumanNarration(scenes, options.narrationDir, options);
   const audioDir = path.join(directory, "narration");
   fs.mkdirSync(audioDir, { recursive: true });
   const prepared = scenes.map((scene, index) => {
     const audio = path.join(audioDir, `${String(index).padStart(2, "0")}-${scene.id}.aiff`);
     command("say", ["-v", options.voice, "-r", String(options.rate), "-o", audio, scene.narration]);
-    return narrationScene(scene, audio, "macos-say");
+    return narrationScene(scene, audio, "macos-say", options);
   });
   validateNarrationTiming(prepared);
   return prepared;
@@ -327,11 +433,11 @@ async function captureCameraBackdrop(page) {
 }
 
 async function focusCamera(page, selector, options = {}) {
-  const { zoom = 1.14, spotlight = true, waitMs = 850, padding = 12 } = options;
+  const { zoom = 1.14, spotlight = true, waitMs = 850, padding = 12, scrollMs = 350, settleMs = 700 } = options;
   await resetCamera(page, 0);
   const locator = await visibleLocator(page, selector);
   await locator.evaluate((node) => node.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" }));
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(scrollMs);
   const box = await locator.boundingBox();
   if (!box) throw new Error(`Could not measure ${selector}`);
   await captureCameraBackdrop(page);
@@ -340,7 +446,7 @@ async function focusCamera(page, selector, options = {}) {
     const shell = document.querySelector(".app-shell");
     if (shell) shell.style.transform = `translate(${x}px,${y}px) scale(${scaleValue})`;
   }, { x: 720 - (box.x + box.width / 2) * scale, y: 450 - (box.y + box.height / 2) * scale, scaleValue: scale });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(settleMs);
   const focusedBox = await locator.boundingBox();
   if (spotlight && focusedBox) {
     await page.evaluate(({ x, y, width, height, inset }) => {
@@ -397,16 +503,19 @@ async function assertUiContract(page) {
     ["candidate options", UI.options], ["model choice", UI.modelChoice], ["safety checks", UI.safety],
     ["decision outcome", UI.outcome], ["decision log", UI.decisionLog], ["primary action", UI.primaryAction],
     ["jump control", UI.jump], ["play control", UI.play],
+    ["demo mode switch", UI.modeSwitch], ["real-day score", UI.realScore],
+    ["causal graph path", UI.causalPath],
   ];
   for (const [label, selector] of required) assert(await page.locator(selector).count() > 0, `UI is missing ${label}: ${selector}`);
 }
 
-async function clickStoryPhase(page, phase) {
-  await resetCamera(page, 220);
+async function clickStoryPhase(page, phase, options = {}) {
+  const fast = options.fast === true;
+  await resetCamera(page, fast ? 60 : 220);
   const selector = `#stage-rail [data-phase="${phase}"], .story-rail [data-phase="${phase}"]`;
   const phaseControl = await visibleLocator(page, selector);
   await phaseControl.scrollIntoViewIfNeeded();
-  await pointTo(page, selector, 280);
+  await pointTo(page, selector, fast ? 100 : 280);
   await phaseControl.click({ force: true });
   const sectionByPhase = {
     trigger: "#why-now", findings: "#agent-findings", options: "#candidate-options",
@@ -417,7 +526,22 @@ async function clickStoryPhase(page, phase) {
     const rail = document.querySelector(`#stage-rail [data-phase="${expectedPhase}"]`);
     return active.length === 1 && active[0].matches(expectedSection) && rail?.getAttribute("aria-current") === "step";
   }, { expectedPhase: phase, expectedSection: sectionByPhase[phase] }, { timeout: 5_000 });
-  await page.waitForTimeout(380);
+  await page.waitForTimeout(fast ? 100 : 380);
+}
+
+function scaledFounderTime(scene, seconds) {
+  const reference = Number(scene.founderSync?.referenceDuration);
+  return Number.isFinite(reference) && reference > 0 ? Number(seconds) * scene.audioDuration / reference : Number(seconds);
+}
+
+function founderCue(scene, cue) {
+  const seconds = scene.founderSync?.cues?.[cue];
+  assert(Number.isFinite(Number(seconds)), `founder cue ${scene.id}.${cue} is missing`);
+  return scaledFounderTime(scene, seconds);
+}
+
+function founderCamera(options = {}) {
+  return { scrollMs: 130, settleMs: 360, waitMs: 160, ...options };
 }
 
 function currentEpisode(snapshot) {
@@ -513,24 +637,40 @@ function assertDistinctAirport(from, to, expectedCode) {
   assert(JSON.stringify(to.resources) !== JSON.stringify(from.resources), "secondary airport needs distinct resources");
   assert(JSON.stringify(to.display) !== JSON.stringify(from.display), "secondary airport needs distinct map/weather display data");
 }
-async function selectAirportUi(page, code) {
-  await demoClick(page, UI.airportButton);
+async function selectAirportUi(page, code, options = {}) {
+  const fast = options.fast === true;
+  await demoClick(page, UI.airportButton, fast ? { pointMs: 100 } : {});
   const optionSelector = `#airport-menu [data-airport="${code}"], #airport-selector [data-airport="${code}"]`;
   const option = await visibleLocator(page, optionSelector);
-  await pointTo(page, optionSelector, 320);
+  await pointTo(page, optionSelector, fast ? 100 : 320);
   await option.click();
   await page.waitForFunction((airport) => document.querySelector("#airport-code")?.textContent?.trim() === airport, code, { timeout: 90_000 });
   await waitUntilIdle(page);
 }
 
+async function selectModeUi(page, mode) {
+  const realDay = mode === "real-day";
+  await demoClick(page, realDay ? UI.realDayMode : UI.recoveryMode, { pointMs: 140 });
+  await page.waitForFunction((expected) => document.body.classList.contains("real-day-mode") === expected, realDay, { timeout: 30_000 });
+  await waitUntilIdle(page, 90_000);
+  if (!realDay) return null;
+  await page.waitForFunction(() => document.querySelector("#real-score-status")?.textContent?.trim() === "FINAL", null, { timeout: 90_000 });
+  const monthProof = await visibleLocator(page, UI.monthProof, 30_000);
+  const values = await monthProof.locator(".benchmark-bars em").allTextContents();
+  assert(values.length >= 2, "completed real-day view must expose both benchmark values");
+  const status = (await page.locator(UI.realScoreStatus).textContent())?.trim();
+  return { status, baseline: values[0]?.trim(), groundgraph: values[1]?.trim() };
+}
+
 async function readOnlyDryRun(chromium, options) {
-  const narrationScenes = loadScenes();
+  const narrationScenes = loadScenes(options);
   let narrationPreflight = { source: "macos-say", planned_minimum_seconds: null };
   if (options.narrationDir) {
     requireCommand("ffprobe");
-    const prepared = prepareHumanNarration(narrationScenes, options.narrationDir);
+    const prepared = prepareHumanNarration(narrationScenes, options.narrationDir, options);
     narrationPreflight = {
       source: "human-files",
+      sync_profile: options.syncProfile,
       planned_minimum_seconds: Number(prepared.reduce((total, scene) => total + scene.minimumDuration, 0).toFixed(3)),
       files: prepared.map((scene) => ({
         scene: scene.id,
@@ -630,7 +770,9 @@ function writeFrameConcat(records, framesDirectory, target) {
   const durations = [];
   for (let index = 0; index < records.length - 1; index += 1) {
     const raw = records[index + 1].timestamp - records[index].timestamp;
-    const duration = Math.max(0.02, Math.min(0.25, raw || 0.07));
+    // Screenshot-backed camera transitions can briefly pause CDP screencast
+    // delivery. Preserve that real time so later narration cues do not drift.
+    const duration = Math.max(0.02, Math.min(2, raw || 0.07));
     durations.push(duration);
     lines.push(`file '${path.join(framesDirectory, records[index].filename).replaceAll("'", "'\\''")}'`);
     lines.push(`duration ${duration.toFixed(6)}`);
@@ -652,16 +794,43 @@ function splitCaptions(text, maxWords = 12) {
   return chunks;
 }
 
-async function startSceneCaptions(page, scene) {
-  const captions = splitCaptions(scene.narration);
-  const captionWeights = captions.map((caption) => Math.max(1, words(caption).length));
-  const totalWeight = captionWeights.reduce((sum, value) => sum + value, 0);
-  const offsets = [];
-  let elapsed = 650;
-  for (const weight of captionWeights) {
-    offsets.push(Math.round(elapsed));
-    elapsed += scene.audioDuration * 1000 * (weight / totalWeight);
+function captionPlan(scene) {
+  const lead = Number(scene.narrationLeadSeconds ?? 0.65);
+  const founderStarts = list(scene.captionStarts);
+  if (!founderStarts.length) {
+    const lines = splitCaptions(scene.narration);
+    const weights = lines.map((line) => Math.max(1, words(line).length));
+    const total = weights.reduce((sum, value) => sum + value, 0);
+    let elapsed = 0;
+    return lines.map((line, index) => {
+      const item = { line, start: elapsed };
+      elapsed += scene.audioDuration * (weights[index] / total);
+      return item;
+    }).map((item) => ({ ...item, start: item.start + lead }));
   }
+
+  const sentences = String(scene.narration).match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((item) => item.trim()).filter(Boolean) || [];
+  assert(sentences.length === founderStarts.length, `${scene.id} founder captions need ${sentences.length} sentence anchors; found ${founderStarts.length}`);
+  const result = [];
+  for (let sentenceIndex = 0; sentenceIndex < sentences.length; sentenceIndex += 1) {
+    const chunks = splitCaptions(sentences[sentenceIndex]);
+    const weights = chunks.map((line) => Math.max(1, words(line).length));
+    const total = weights.reduce((sum, value) => sum + value, 0);
+    const start = scaledFounderTime(scene, founderStarts[sentenceIndex]);
+    const end = sentenceIndex + 1 < sentences.length
+      ? scaledFounderTime(scene, founderStarts[sentenceIndex + 1])
+      : scene.audioDuration;
+    let elapsed = start;
+    for (let index = 0; index < chunks.length; index += 1) {
+      result.push({ line: chunks[index], start: lead + elapsed });
+      elapsed += Math.max(0, end - start) * (weights[index] / total);
+    }
+  }
+  return result;
+}
+
+async function startSceneCaptions(page, scene) {
+  const plan = captionPlan(scene);
   await page.evaluate(({ lines, starts, clearAt }) => {
     for (const timer of window.__groundgraphDemoCaptionTimers || []) clearTimeout(timer);
     const node = document.getElementById("demo-recorder-caption");
@@ -674,7 +843,11 @@ async function startSceneCaptions(page, scene) {
     }, starts[index]));
     timers.push(setTimeout(() => node.classList.remove("visible"), clearAt));
     window.__groundgraphDemoCaptionTimers = timers;
-  }, { lines: captions, starts: offsets, clearAt: Math.round(650 + scene.audioDuration * 1000 + 120) });
+  }, {
+    lines: plan.map((item) => item.line),
+    starts: plan.map((item) => Math.round(item.start * 1000)),
+    clearAt: Math.round((Number(scene.narrationLeadSeconds ?? 0.65) + scene.audioDuration + 0.12) * 1000),
+  });
 }
 
 async function clearSceneCaptions(page) {
@@ -699,19 +872,15 @@ function writeSubtitles(sceneRecords, target) {
   let cueIndex = 1;
   const lines = [];
   for (const scene of sceneRecords) {
-    const captions = splitCaptions(scene.narration);
-    const counts = captions.map((caption) => Math.max(1, words(caption).length));
-    const total = counts.reduce((sum, value) => sum + value, 0);
-    const narrationStart = sceneStart + 0.65;
-    const available = Math.min(scene.audioDuration, Math.max(1, scene.duration - 0.8));
-    let offset = 0;
-    for (let index = 0; index < captions.length; index += 1) {
-      const duration = available * (counts[index] / total);
-      const start = narrationStart + offset;
-      const end = Math.min(sceneStart + scene.duration - 0.05, start + duration - 0.04);
-      lines.push(String(cueIndex), `${srtTime(start)} --> ${srtTime(end)}`, captions[index], "");
+    const plan = captionPlan(scene);
+    for (let index = 0; index < plan.length; index += 1) {
+      const start = sceneStart + plan[index].start;
+      const naturalEnd = index + 1 < plan.length
+        ? sceneStart + plan[index + 1].start - 0.04
+        : sceneStart + Number(scene.narrationLeadSeconds ?? 0.65) + scene.audioDuration;
+      const end = Math.min(sceneStart + scene.duration - 0.05, naturalEnd);
+      lines.push(String(cueIndex), `${srtTime(start)} --> ${srtTime(Math.max(start + 0.1, end))}`, plan[index].line, "");
       cueIndex += 1;
-      offset += duration;
     }
     sceneStart += scene.duration;
   }
@@ -731,8 +900,9 @@ function renderVideoAndAudio(frames, framesDirectory, sceneRecords, workDirector
   const paddedFiles = [];
   for (const [index, scene] of sceneRecords.entries()) {
     const padded = path.join(workDirectory, `audio-${String(index).padStart(2, "0")}.wav`);
+    const delay = Math.round(Number(scene.narrationLeadSeconds ?? 0.65) * 1000);
     command("ffmpeg", [
-      "-y", "-v", "warning", "-i", scene.audio, "-af", "adelay=650:all=1,apad", "-t", scene.duration.toFixed(3),
+      "-y", "-v", "warning", "-i", scene.audio, "-af", `adelay=${delay}:all=1,apad`, "-t", scene.duration.toFixed(3),
       "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", padded,
     ]);
     paddedFiles.push(padded);
@@ -763,15 +933,22 @@ async function recordCandidate(chromium, options) {
   const framesDirectory = path.join(workDirectory, "frames");
   fs.mkdirSync(framesDirectory, { recursive: true });
   fs.mkdirSync(path.dirname(options.output), { recursive: true });
-  const scenes = prepareNarration(loadScenes(), workDirectory, options);
+  const scenes = prepareNarration(loadScenes(options), workDirectory, options);
 
   const initialHealth = await jsonRequest(options.url, "/api/health");
   validateHealth(initialHealth);
   const catalog = await jsonRequest(options.url, "/api/scenarios");
   const ordEntry = list(catalog.scenarios).find((item) => item.airport === "ORD");
   const secondaryEntry = list(catalog.scenarios).find((item) => item.airport === options.secondaryAirport);
+  const atlEntry = list(catalog.scenarios).find((item) => item.airport === "ATL");
+  const sfoEntry = list(catalog.scenarios).find((item) => item.airport === "SFO");
   assert(ordEntry, "scenario registry must contain ORD");
   assert(secondaryEntry, `scenario registry must contain ${options.secondaryAirport}`);
+  if (options.syncProfile === "founder") {
+    assert(atlEntry, "founder airport proof requires ATL");
+    assert(sfoEntry, "founder airport proof requires SFO");
+    assert(new Set([ordEntry.runtime_graph_name, atlEntry.runtime_graph_name, sfoEntry.runtime_graph_name]).size === 3, "ORD, ATL, and SFO must use distinct FalkorDB graphs");
+  }
   assert(ordEntry.id !== secondaryEntry.id && ordEntry.runtime_graph_name !== secondaryEntry.runtime_graph_name, "airport scenarios must use distinct graph identities");
   await jsonRequest(options.url, "/api/scenarios/select", { method: "POST", body: JSON.stringify({ scenario_id: ordEntry.id }) });
   await jsonRequest(options.url, "/api/reset", { method: "POST", body: JSON.stringify({ preserve_memory: false }) });
@@ -786,7 +963,7 @@ async function recordCandidate(chromium, options) {
 
   const { browser, context, page } = await launchPage(chromium);
   const sceneRecords = [];
-  const proof = { applied: {}, no_action: {}, airport_switch: {} };
+  const proof = { applied: {}, no_action: {}, airport_switch: {}, benchmark: {} };
   let frames = [];
   let proposedSnapshot;
   let proposedStory;
@@ -808,7 +985,11 @@ async function recordCandidate(chromium, options) {
         const remaining = seconds * 1000 - (Date.now() - started);
         if (remaining > 0) await page.waitForTimeout(remaining);
       };
-      await action({ at });
+      const atAudio = async (cue) => {
+        const seconds = typeof cue === "string" ? founderCue(scene, cue) : Number(cue);
+        await at(Number(scene.narrationLeadSeconds ?? 0.65) + seconds);
+      };
+      await action({ at, atAudio });
       const elapsed = (Date.now() - started) / 1000;
       if (elapsed < scene.minimumDuration) await page.waitForTimeout((scene.minimumDuration - elapsed) * 1000);
       const duration = (Date.now() - started) / 1000;
@@ -817,63 +998,8 @@ async function recordCandidate(chromium, options) {
       console.log(`${scene.id}: ${duration.toFixed(1)}s visual, ${scene.audioDuration.toFixed(1)}s narration`);
     }
 
-    await runScene(scenes[0], async ({ at }) => {
-      await setCursorVisible(page, false);
-      await focusCamera(page, UI.airportMap, { zoom: 1.04, spotlight: false, waitMs: 200 });
-      await at(4.2);
-      await setCursorVisible(page, true);
-      await demoClick(page, UI.jump);
-      proposedSnapshot = await snapshotWhen(options.url, (snapshot) => {
-        const plan = snapshot.current_plan || {};
-        return plan.status === "PROPOSED" && Boolean(currentEpisode(snapshot));
-      }, "an ORD proposal at the baggage disruption");
-      await waitUntilIdle(page);
-      proposedStory = await getDecisionStory(options.url, currentEpisode(proposedSnapshot));
-      assertProposedStory(proposedStory, proposedSnapshot);
-      await setCursorVisible(page, false);
-    });
-
-    await runScene(scenes[1], async () => {
-      await setCursorVisible(page, true);
-      await clickStoryPhase(page, "trigger");
-      await focusCamera(page, UI.whyNow, { zoom: 1.18, spotlight: true });
-      await pointTo(page, UI.whyNow, 700);
-      await setCursorVisible(page, false);
-    });
-
-    await runScene(scenes[2], async ({ at }) => {
-      await setCursorVisible(page, true);
-      await clickStoryPhase(page, "findings");
-      await focusCamera(page, UI.findings, { zoom: 1.14, spotlight: true });
-      for (const [second, agent] of [[4, "weather"], [9, "gate"], [14, "turn"], [18, "memory"]]) {
-        await at(second);
-        await pointTo(page, `#agent-findings [data-agent="${agent}"], .story-findings [data-agent="${agent}"]`, 420).catch(() => pointTo(page, UI.findings, 420));
-      }
-      await setCursorVisible(page, false);
-    });
-
-    await runScene(scenes[3], async ({ at }) => {
-      await setCursorVisible(page, true);
-      await clickStoryPhase(page, "options");
-      await focusCamera(page, UI.options, { zoom: 1.14, spotlight: true });
-      await at(6);
-      await pointTo(page, "#story-candidates, #candidate-options", 800);
-      await at(17);
-      await resetCamera(page, 180);
-      await clickStoryPhase(page, "choice");
-      await focusCamera(page, UI.modelChoice, { zoom: 1.2, spotlight: true, waitMs: 300 });
-      await pointTo(page, UI.modelChoice, 700);
-      await setCursorVisible(page, false);
-    });
-
-    await runScene(scenes[4], async ({ at }) => {
-      await setCursorVisible(page, true);
-      await clickStoryPhase(page, "guards");
-      await focusCamera(page, UI.safety, { zoom: 1.16, spotlight: true });
-      await pointTo(page, UI.safety, 700);
-      await at(11.5);
-      await resetCamera(page, 300);
-      await demoClick(page, UI.primaryAction);
+    async function applyCurrentProposal(clickOptions = {}) {
+      await demoClick(page, UI.primaryAction, clickOptions);
       const appliedSnapshot = await snapshotWhen(options.url, (snapshot) => {
         const plan = snapshot.current_plan || {};
         return String(plan.episode_id) === String(proposedStory.episode_id) && plan.status === "APPLIED";
@@ -891,6 +1017,149 @@ async function recordCandidate(chromium, options) {
         guards_passed: appliedStory.guards.filter((item) => item.passed).length,
         recovered_minutes: appliedStory.outcome.recovered_minutes,
       };
+      return appliedSnapshot;
+    }
+
+    await runScene(scenes[0], async ({ at, atAudio }) => {
+      await setCursorVisible(page, false);
+      await focusCamera(page, UI.airportMap, options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.04, spotlight: false, waitMs: 100 })
+        : { zoom: 1.04, spotlight: false, waitMs: 200 });
+      if (options.syncProfile === "founder") {
+        await atAudio("productCut");
+        return;
+      }
+      await at(4.2);
+      await setCursorVisible(page, true);
+      await demoClick(page, UI.jump);
+      proposedSnapshot = await snapshotWhen(options.url, (snapshot) => {
+        const plan = snapshot.current_plan || {};
+        return plan.status === "PROPOSED" && Boolean(currentEpisode(snapshot));
+      }, "an ORD proposal at the baggage disruption");
+      await waitUntilIdle(page);
+      proposedStory = await getDecisionStory(options.url, currentEpisode(proposedSnapshot));
+      assertProposedStory(proposedStory, proposedSnapshot);
+      await setCursorVisible(page, false);
+    });
+
+    await runScene(scenes[1], async ({ atAudio }) => {
+      if (options.syncProfile === "founder") {
+        await setCursorVisible(page, false);
+        await focusCamera(page, UI.airportMap, founderCamera({ zoom: 1.04, spotlight: false, waitMs: 80 }));
+        await atAudio("disruption");
+        await setCursorVisible(page, true);
+        await demoClick(page, UI.jump, { pointMs: 100 });
+        proposedSnapshot = await snapshotWhen(options.url, (snapshot) => {
+          const plan = snapshot.current_plan || {};
+          return plan.status === "PROPOSED" && Boolean(currentEpisode(snapshot));
+        }, "an ORD proposal at the baggage disruption");
+        await waitUntilIdle(page);
+        proposedStory = await getDecisionStory(options.url, currentEpisode(proposedSnapshot));
+        assertProposedStory(proposedStory, proposedSnapshot);
+        await clickStoryPhase(page, "trigger", { fast: true });
+        await focusCamera(page, UI.whyNow, founderCamera({ zoom: 1.16, spotlight: true }));
+        await setCursorVisible(page, false);
+        return;
+      }
+      await setCursorVisible(page, true);
+      await clickStoryPhase(page, "trigger");
+      await focusCamera(page, UI.whyNow, { zoom: 1.18, spotlight: true });
+      await pointTo(page, UI.whyNow, 700);
+      await setCursorVisible(page, false);
+    });
+
+    await runScene(scenes[2], async ({ at, atAudio }) => {
+      await setCursorVisible(page, true);
+      await clickStoryPhase(page, "findings", { fast: options.syncProfile === "founder" });
+      await focusCamera(page, UI.findings, options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.14, spotlight: true })
+        : { zoom: 1.14, spotlight: true });
+      if (options.syncProfile === "founder") {
+        for (const agent of ["weather", "flow", "gate", "turn", "policy", "memory"]) {
+          await atAudio(agent);
+          await pointTo(page, `#agent-findings [data-agent="${agent}"]`, 180);
+        }
+        await atAudio("handoffs");
+        await resetCamera(page, 80);
+        await demoClick(page, '[data-tab="cycles"]', { pointMs: 100 });
+        await focusCamera(page, "#cycles-stage", founderCamera({ zoom: 1.08, spotlight: true }));
+        await atAudio("falkordb");
+        await pointTo(page, "#handoff-ticker", 180);
+        await atAudio("coordinator");
+        await pointTo(page, "#cycles-stage .handoff-card", 280);
+        await setCursorVisible(page, false);
+        return;
+      }
+      for (const [second, agent] of [[4, "weather"], [9, "gate"], [14, "turn"], [18, "memory"]]) {
+        await at(second);
+        await pointTo(page, `#agent-findings [data-agent="${agent}"], .story-findings [data-agent="${agent}"]`, 420).catch(() => pointTo(page, UI.findings, 420));
+      }
+      await setCursorVisible(page, false);
+    });
+
+    await runScene(scenes[3], async ({ at, atAudio }) => {
+      await setCursorVisible(page, true);
+      if (options.syncProfile === "founder") {
+        const close = page.locator("#proof-close").first();
+        if (await close.count() && await close.isVisible()) await close.click();
+      }
+      await clickStoryPhase(page, "options", { fast: options.syncProfile === "founder" });
+      await focusCamera(page, UI.options, options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.14, spotlight: true })
+        : { zoom: 1.14, spotlight: true });
+      if (options.syncProfile === "founder") {
+        await atAudio("candidates");
+        await pointTo(page, "#story-candidates", 220);
+        await atAudio("localQwen");
+        await pointTo(page, "#options-title", 180);
+        await atAudio("shortlist");
+        await clickStoryPhase(page, "choice", { fast: true });
+        await focusCamera(page, UI.modelChoice, founderCamera({ zoom: 1.18, spotlight: true }));
+        await atAudio("selected");
+        await pointTo(page, UI.modelChoice, 220);
+        await atAudio("causalPath");
+        await focusCamera(page, UI.causalPath, founderCamera({ zoom: 1.12, spotlight: true, padding: 8 }));
+        await pointTo(page, `${UI.causalPath} .causal-node`, 260);
+        await setCursorVisible(page, false);
+        return;
+      }
+      await at(6);
+      await pointTo(page, "#story-candidates, #candidate-options", 800);
+      await at(17);
+      await resetCamera(page, 180);
+      await clickStoryPhase(page, "choice");
+      await focusCamera(page, UI.modelChoice, { zoom: 1.2, spotlight: true, waitMs: 300 });
+      await pointTo(page, UI.modelChoice, 700);
+      await setCursorVisible(page, false);
+    });
+
+    await runScene(scenes[4], async ({ at, atAudio }) => {
+      await setCursorVisible(page, true);
+      await clickStoryPhase(page, "guards", { fast: options.syncProfile === "founder" });
+      await focusCamera(page, UI.safety, options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.16, spotlight: true })
+        : { zoom: 1.16, spotlight: true });
+      if (options.syncProfile === "founder") {
+        await atAudio("guards");
+        await pointTo(page, UI.safety, 180);
+        for (const [cue, index] of [["resources", 1], ["policy", 3], ["timing", 4], ["benefit", 5]]) {
+          await atAudio(cue);
+          await pointTo(page, `#story-guards > :nth-child(${index})`, 160).catch(() => pointTo(page, UI.safety, 160));
+        }
+        await atAudio("apply");
+        await resetCamera(page, 100);
+        await applyCurrentProposal({ pointMs: 100 });
+        await atAudio("outcome");
+        await clickStoryPhase(page, "outcome", { fast: true });
+        await focusCamera(page, UI.outcome, founderCamera({ zoom: 1.18, spotlight: true }));
+        await pointTo(page, "#story-outcome", 260);
+        await setCursorVisible(page, false);
+        return;
+      }
+      await pointTo(page, UI.safety, 700);
+      await at(11.5);
+      await resetCamera(page, 300);
+      await applyCurrentProposal();
       await resetCamera(page, 180);
       await clickStoryPhase(page, "outcome");
       await focusCamera(page, UI.outcome, { zoom: 1.18, spotlight: true, waitMs: 350 });
@@ -898,13 +1167,13 @@ async function recordCandidate(chromium, options) {
       await setCursorVisible(page, false);
     });
 
-    await runScene(scenes[5], async ({ at }) => {
+    await runScene(scenes[5], async ({ at, atAudio }) => {
       await resetCamera(page, 200);
       await setCursorVisible(page, true);
       let noActionSnapshot;
       let noActionEntry;
       for (const target of [appliedStory.next_checkpoint.minute, appliedStory.next_checkpoint.minute + 5]) {
-        await pointTo(page, "#timeline", 250);
+        await pointTo(page, "#timeline", options.syncProfile === "founder" ? 100 : 250);
         await seekReplay(page, target);
         noActionSnapshot = await snapshotWhen(
           options.url,
@@ -919,15 +1188,28 @@ async function recordCandidate(chromium, options) {
       const noActionStory = await getDecisionStory(options.url, noActionEntry.episode_id);
       assertNoActionStory(noActionStory);
       await clickDecisionEpisode(page, noActionStory.episode_id);
-      await clickStoryPhase(page, "trigger");
-      await focusCamera(page, UI.whyNow, { zoom: 1.18, spotlight: true, waitMs: 300 });
-      await pointTo(page, UI.whyNow, 500);
-      await at(8);
-      await clickStoryPhase(page, "choice");
-      await focusCamera(page, UI.modelChoice, { zoom: 1.18, spotlight: true, waitMs: 250 });
-      await at(13.5);
-      await clickStoryPhase(page, "outcome");
-      await focusCamera(page, UI.outcome, { zoom: 1.18, spotlight: true, waitMs: 250 });
+      await clickStoryPhase(page, "trigger", { fast: options.syncProfile === "founder" });
+      await focusCamera(page, UI.whyNow, options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.18, spotlight: true })
+        : { zoom: 1.18, spotlight: true, waitMs: 300 });
+      await pointTo(page, UI.whyNow, options.syncProfile === "founder" ? 180 : 500);
+      if (options.syncProfile === "founder") {
+        await atAudio("threshold");
+        await pointTo(page, "#story-trigger-copy", 180);
+        await atAudio("noAction");
+        await clickStoryPhase(page, "choice", { fast: true });
+        await focusCamera(page, UI.modelChoice, founderCamera({ zoom: 1.18, spotlight: true }));
+        await atAudio("continuous");
+        await clickStoryPhase(page, "outcome", { fast: true });
+        await focusCamera(page, UI.outcome, founderCamera({ zoom: 1.18, spotlight: true }));
+      } else {
+        await at(8);
+        await clickStoryPhase(page, "choice");
+        await focusCamera(page, UI.modelChoice, { zoom: 1.18, spotlight: true, waitMs: 250 });
+        await at(13.5);
+        await clickStoryPhase(page, "outcome");
+        await focusCamera(page, UI.outcome, { zoom: 1.18, spotlight: true, waitMs: 250 });
+      }
       proof.no_action = {
         episode_id: noActionStory.episode_id,
         cycle: noActionStory.cycle,
@@ -939,33 +1221,82 @@ async function recordCandidate(chromium, options) {
       await setCursorVisible(page, false);
     });
 
-    await runScene(scenes[6], async ({ at }) => {
+    await runScene(scenes[6], async ({ at, atAudio }) => {
       await resetCamera(page, 150);
       await setCursorVisible(page, true);
       await clickDecisionEpisode(page, appliedStory.episode_id);
       const memoryTab = page.locator('[data-tab="memory"]').first();
       if (await memoryTab.count()) {
-        await demoClick(page, '[data-tab="memory"]');
-        await focusCamera(page, "#memory-stage", { zoom: 1.13, spotlight: true, waitMs: 250 });
+        await demoClick(page, '[data-tab="memory"]', options.syncProfile === "founder" ? { pointMs: 100 } : {});
+        await focusCamera(page, "#memory-stage", options.syncProfile === "founder"
+          ? founderCamera({ zoom: 1.13, spotlight: true })
+          : { zoom: 1.13, spotlight: true, waitMs: 250 });
       } else await focusCamera(page, UI.outcome, { zoom: 1.14, spotlight: true, waitMs: 250 });
-      await at(10);
+      if (options.syncProfile === "founder") {
+        await atAudio("contextMatch");
+        await pointTo(page, "#memory-stage .memory-row", 220).catch(() => pointTo(page, "#memory-stage", 220));
+        await atAudio("operatorAsks");
+      } else await at(10);
       const close = page.locator("#proof-close").first();
       if (await close.count() && await close.isVisible()) await close.click();
-      await focusCamera(page, ".brain-card", { zoom: 1.13, spotlight: true, waitMs: 250 });
+      await focusCamera(page, ".brain-card", options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.13, spotlight: true })
+        : { zoom: 1.13, spotlight: true, waitMs: 250 });
       const question = "Who owns the current gate reassignment policy?";
-      await demoClick(page, `[data-brain-question="${question}"]`);
+      const responsePromise = options.syncProfile === "founder"
+        ? page.waitForResponse((response) => response.url().includes("/api/company-brain") && response.request().method() === "POST", { timeout: 30_000 })
+        : null;
+      await demoClick(page, `[data-brain-question="${question}"]`, options.syncProfile === "founder" ? { pointMs: 100 } : {});
       await page.waitForSelector("#brain-answer .brain-response", { timeout: 30_000 });
-      const answer = await jsonRequest(options.url, "/api/company-brain", { method: "POST", body: JSON.stringify({ question }) });
+      const answer = responsePromise ? await (await responsePromise).json() : await jsonRequest(options.url, "/api/company-brain", { method: "POST", body: JSON.stringify({ question }) });
       assert(answer.answer_type === "OWNERSHIP_AND_AUTHORITY", "Operations Brain must return ownership and authority");
       assert(list(answer.evidence_ids).length >= 4 && list(answer.graph_path).length >= 3, "Operations Brain answer must include graph evidence and path");
-      await pointTo(page, "#brain-answer .brain-response", 800);
+      if (options.syncProfile === "founder") {
+        await atAudio("companyBrain");
+        await pointTo(page, "#brain-answer .brain-proof-row", 220);
+        await atAudio("evidence");
+        const citation = page.locator("#brain-answer .brain-evidence summary").first();
+        if (await citation.count()) await citation.click();
+        await focusCamera(page, "#brain-answer .brain-response", founderCamera({ zoom: 1.13, spotlight: true, padding: 8 }));
+      } else await pointTo(page, "#brain-answer .brain-response", 800);
       await setCursorVisible(page, false);
     });
 
-    await runScene(scenes[7], async ({ at }) => {
+    await runScene(scenes[7], async ({ at, atAudio }) => {
       await resetCamera(page, 150);
       await setCursorVisible(page, true);
-      await focusCamera(page, UI.airportSelector, { zoom: 1.17, spotlight: true, waitMs: 250 });
+      await focusCamera(page, UI.airportSelector, options.syncProfile === "founder"
+        ? founderCamera({ zoom: 1.12, spotlight: true, waitMs: 80 })
+        : { zoom: 1.17, spotlight: true, waitMs: 250 });
+      if (options.syncProfile === "founder") {
+        await atAudio("atlanta");
+        await selectAirportUi(page, "ATL", { fast: true });
+        const atlSnapshot = await snapshotWhen(options.url, (snapshot) => snapshot.scenario?.airport === "ATL", "ATL to become active");
+        const atlSignature = snapshotSignature(atlSnapshot);
+        assertDistinctAirport(ordSignature, atlSignature, "ATL");
+        await atAudio("sanFrancisco");
+        await selectAirportUi(page, "SFO", { fast: true });
+        const sfoSnapshot = await snapshotWhen(options.url, (snapshot) => snapshot.scenario?.airport === "SFO", "SFO to become active");
+        const sfoSignature = snapshotSignature(sfoSnapshot);
+        assertDistinctAirport(ordSignature, sfoSignature, "SFO");
+        assert(sfoSignature.graph !== atlSignature.graph, "ATL and SFO must use different FalkorDB graphs");
+        await atAudio("ordReturn");
+        await selectAirportUi(page, "ORD", { fast: true });
+        const restoredOrd = await snapshotWhen(options.url, (snapshot) => snapshot.scenario?.airport === "ORD", "ORD to be restored");
+        assert(restoredOrd.graph?.name === ordSignature.graph, "returning to ORD must restore its original FalkorDB graph");
+        assert(history(restoredOrd).some((item) => String(item.episode_id) === String(appliedStory.episode_id)), "returning to ORD must retain the applied decision episode");
+        proof.airport_switch = {
+          from: "ORD",
+          comparisons: [
+            { airport: "ATL", graph: atlSignature.graph, distinct_flights: JSON.stringify(ordSignature.flights) !== JSON.stringify(atlSignature.flights), distinct_resources: JSON.stringify(ordSignature.resources) !== JSON.stringify(atlSignature.resources) },
+            { airport: "SFO", graph: sfoSignature.graph, distinct_flights: JSON.stringify(ordSignature.flights) !== JSON.stringify(sfoSignature.flights), distinct_resources: JSON.stringify(ordSignature.resources) !== JSON.stringify(sfoSignature.resources) },
+          ],
+          ord_graph: ordSignature.graph,
+          ord_episode_restored: true,
+        };
+        await setCursorVisible(page, false);
+        return;
+      }
       await selectAirportUi(page, options.secondaryAirport);
       const secondarySnapshot = await snapshotWhen(options.url, (snapshot) => snapshot.scenario?.airport === options.secondaryAirport, `${options.secondaryAirport} to become active`);
       const secondarySignature = snapshotSignature(secondarySnapshot);
@@ -989,11 +1320,36 @@ async function recordCandidate(chromium, options) {
       await setCursorVisible(page, false);
     });
 
-    await runScene(scenes[8], async () => {
+    await runScene(scenes[8], async ({ atAudio }) => {
       await clickDecisionEpisode(page, appliedStory.episode_id);
-      await clickStoryPhase(page, "outcome");
+      await clickStoryPhase(page, "outcome", { fast: options.syncProfile === "founder" });
       await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
-      await resetCamera(page, 500);
+      await resetCamera(page, options.syncProfile === "founder" ? 120 : 500);
+      if (options.syncProfile === "founder") {
+        await setCursorVisible(page, true);
+        await atAudio("handoffs");
+        await demoClick(page, '[data-tab="cycles"]', { pointMs: 100 });
+        await focusCamera(page, "#cycles-stage", founderCamera({ zoom: 1.06, spotlight: true }));
+        await atAudio("realDay");
+        const close = page.locator("#proof-close").first();
+        if (await close.count() && await close.isVisible()) await close.click();
+        await focusCamera(page, UI.modeSwitch, founderCamera({ zoom: 1.12, spotlight: true, waitMs: 80 }));
+        const benchmark = await selectModeUi(page, "real-day");
+        assert(benchmark.status === "FINAL", "real-day proof must be a completed, final replay");
+        assert(String(benchmark.baseline).includes("34.92") && String(benchmark.groundgraph).includes("19.07"), `benchmark must show 34.92 → 19.07 min; received ${benchmark.baseline} → ${benchmark.groundgraph}`);
+        proof.benchmark = benchmark;
+        await focusCamera(page, UI.realScore, founderCamera({ zoom: 1.08, spotlight: true, padding: 8 }));
+        await atAudio("cutoff");
+        await pointTo(page, "#real-score-copy", 180);
+        await atAudio("benchmark");
+        await focusCamera(page, UI.monthProof, founderCamera({ zoom: 1.08, spotlight: true, padding: 8 }));
+        await atAudio("baseline");
+        await pointTo(page, ".benchmark-bars > span:first-child", 180);
+        await atAudio("groundgraph");
+        await pointTo(page, ".benchmark-bars > span.winner", 260);
+        await atAudio("faceCut");
+        await resetCamera(page, 120);
+      }
       await setCursorVisible(page, false);
       await page.evaluate(() => { const focus = document.getElementById("demo-recorder-focus"); if (focus) focus.style.opacity = "0"; });
       await page.screenshot({ path: options.output.replace(/\.mp4$/i, "-cover.jpg"), type: "jpeg", quality: 94, fullPage: false });
@@ -1005,6 +1361,8 @@ async function recordCandidate(chromium, options) {
   const subtitleFile = renderVideoAndAudio(frames, framesDirectory, sceneRecords, workDirectory, options.output);
   const videoDuration = probeDuration(options.output);
   assert(videoDuration >= 140 && videoDuration <= 190, `candidate must be 2:20–3:10; received ${videoDuration.toFixed(1)} seconds`);
+  const recordedDuration = sceneRecords.reduce((total, scene) => total + scene.duration, 0);
+  assert(Math.abs(videoDuration - recordedDuration) <= 0.35, `rendered timeline drifted from recorded scenes: ${videoDuration.toFixed(3)}s rendered vs ${recordedDuration.toFixed(3)}s recorded`);
   const digest = crypto.createHash("sha256").update(fs.readFileSync(options.output)).digest("hex");
   const manifest = {
     created_at: new Date().toISOString(),
@@ -1013,6 +1371,7 @@ async function recordCandidate(chromium, options) {
     health: { runtime_mode: health.runtime_mode, graph: health.graph, endpoint: health.endpoint, llm: health.llm, agents: health.agents },
     narration: {
       source: options.narrationDir ? "human-files" : "macos-say",
+      sync_profile: options.syncProfile,
       voice: options.narrationDir ? "human narrator" : options.voice,
       rate: options.narrationDir ? null : options.rate,
       word_count: scenes.reduce((total, scene) => total + words(scene.narration).length, 0),
@@ -1022,11 +1381,15 @@ async function recordCandidate(chromium, options) {
         file: path.basename(scene.audio),
         sha256: scene.audioSha256,
         duration_seconds: Number(scene.audioDuration.toFixed(3)),
+        lead_seconds: Number(scene.narrationLeadSeconds.toFixed(3)),
       })),
     },
+    editor_cues: options.syncProfile === "founder"
+      ? Object.fromEntries(scenes.filter((scene) => Object.keys(scene.editorCuts || {}).length).map((scene) => [scene.id, Object.fromEntries(Object.entries(scene.editorCuts).map(([key, value]) => [key, Number(scaledFounderTime(scene, value).toFixed(3))]))]))
+      : {},
     semantic_proof: proof,
-    scenes: sceneRecords.map(({ id, title, narration, audioDuration, duration }) => ({
-      id, title, narration, audio_duration_seconds: audioDuration, visual_duration_seconds: duration,
+    scenes: sceneRecords.map(({ id, title, narration, audioDuration, duration, narrationLeadSeconds }) => ({
+      id, title, narration, audio_duration_seconds: audioDuration, narration_lead_seconds: narrationLeadSeconds, visual_duration_seconds: duration,
     })),
     output: path.relative(repoRoot, options.output),
     duration_seconds: videoDuration,

@@ -13,7 +13,8 @@ It never overwrites `demo/groundgraph-demo.mp4`. Candidate review and promotion 
 - Node.js 20 or newer;
 - Playwright 1.62.1 or newer;
 - macOS `say` when generated narration is used; and
-- `ffmpeg` and `ffprobe`.
+- `ffmpeg` and `ffprobe`;
+- Pillow 11.3.0 for the founder-led title cards and evidence cover.
 
 The wrapper can use the Playwright copy bundled with Codex. On another machine:
 
@@ -48,7 +49,7 @@ The default target uses Daniel at 185 words per minute and switches ORD to ATL:
 
 Expected duration is **about 2:40–2:50**. Runtime model latency may extend a scene, but the finished candidate must remain between 2:20 and 3:10 or the recorder rejects it.
 
-### Use human narration
+### Use standard human narration
 
 Pass `--narration-dir` to replace `say` with one recording per scene. The
 directory must contain exactly one supported audio file for each canonical
@@ -100,6 +101,68 @@ declared minimum or the recorded clip plus 1.5 seconds. This retains the same
 captions, evidence checks, and scene order as generated narration. A single
 continuous master track is not accepted because live API and model latency can
 change individual scene lengths.
+
+### Founder-synchronised final cut
+
+The published founder-led demo uses the pause-marked copy in
+[`demo/human-recording-script.md`](../demo/human-recording-script.md). The raw
+camera and Voice Memos takes are personal editing inputs and stay local rather
+than entering Git history. Put them in `demo/` with these names:
+
+```text
+1.mov          opening face take
+missed.m4a     why-now narration
+2.m4a          six findings
+3.m4a          options and local Qwen
+4.m4a          seven checks and application
+5.m4a          deliberate no-action cycle
+6.m4a          memory and Company Brain
+7.m4a          ATL and SFO reuse
+8.mov          benchmark and founder close
+```
+
+Install the development tools, prepare cleaned canonical narration, and verify
+all nine clips without changing replay state:
+
+```bash
+python3.12 -m pip install -r requirements-dev.txt
+python3.12 scripts/prepare_human_media.py
+./scripts/record_demo.sh \
+  --dry-run \
+  --sync-profile=founder \
+  --narration-dir=.artifacts/human-media/narration
+```
+
+Capture the working interface with actions timed to the recorded phrases:
+
+```bash
+./scripts/record_demo.sh \
+  --record \
+  --allow-mutations \
+  --force \
+  --keep-work \
+  --sync-profile=founder \
+  --narration-dir=.artifacts/human-media/narration \
+  --output=demo/groundgraph-founder-screen-candidate.mp4
+```
+
+After reviewing the screen capture, add the face opening and close:
+
+```bash
+python3.12 scripts/assemble_founder_video.py \
+  --candidate=demo/groundgraph-founder-screen-candidate.mp4 \
+  --opening=demo/1.mov \
+  --closing=demo/8.mov \
+  --output=demo/groundgraph-founder-candidate.mp4 \
+  --force
+```
+
+The compositor preserves the verified narration audio bit-for-bit, rejects
+duration or source-checksum drift, carries the runtime and semantic evidence
+into the edited manifest, performs decode/black-frame/silence/media checks, and
+generates an evidence-led cover. The local raw takes and intermediate founder
+candidates are ignored by Git; only the reviewed promoted demo, cover, and
+manifest are published.
 
 The explicit mutation flag is required because the run:
 

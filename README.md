@@ -55,17 +55,55 @@ The backtest uses a dedicated graph that is cleared and rebuilt when the runtime
 
 ## Why FalkorDB is essential
 
-FalkorDB is the application's operational state, coordination bus, policy store, and memory. It holds:
+FalkorDB is the application's operational state, coordination bus, policy store, and memory. The core graph is:
 
-```text
-event → affected flight / runway / turnaround task
-flight → RECOVERED_BY → action → USES_RESOURCE / REORDERS / PROTECTS
-action → AUTHORIZED_BY → policy → procedure → document / owner / role
-agent run → finding → handoff → coordinator episode → tool calls
-episode → selected plan → outcome ← context-matched memory → later episode
-entity → SOURCED_FROM / MODELED_BY → source record → source
-policy → procedure → source document → owner team → responsible role
+```mermaid
+flowchart LR
+    S[Scenario] -->|HAS_EVENT| E[OperationalEvent]
+    E[OperationalEvent] -->|AFFECTS| F[Flight]
+    E -->|CONSTRAINS| R[Runway / Gate]
+    E -->|DELAYS| TT[TurnaroundTask]
+    F -->|ROTATES_TO| F2[Downstream Flight]
+
+    AG[Specialist Agent] -->|STARTED| AR[AgentRun]
+    AR[AgentRun] -->|PRODUCED| FN[Finding]
+    FN -->|PACKAGED_AS| H[Handoff]
+    H -->|DELIVERED_TO| C[Coordinator Agent]
+    D[DecisionEpisode] -->|CONSUMED_HANDOFF| H
+    D -->|ANALYZED| S
+    D -->|SELECTED| P[Plan]
+    P -->|PROPOSES| A[Action]
+    F -->|RECOVERED_BY| A
+    A -->|USES_RESOURCE| R
+    A -->|AUTHORIZED_BY| POL[Policy]
+
+    POL -->|ALIGNED_WITH| PV[ProcedureVersion]
+    PV -->|IN_DOCUMENT| DOC[SourceDocument]
+    PV -->|OWNED_BY| TEAM[Team]
+    PV -->|RESPONSIBLE_ROLE| ROLE[Role]
+
+    P -->|RESULTED_IN| O[Outcome]
+    M[Memory] -->|REMEMBERS| O
+    D2[Later DecisionEpisode] -->|RECALLED| M
 ```
+
+One representative agent traversal follows a disruption through its connected rotation and the selected policy-authorized response:
+
+```cypher
+MATCH (scenario:Scenario)-[:HAS_EVENT]->
+      (event:OperationalEvent {id: 'EVT-BAG-0836'})-[:AFFECTS]->(flight:Flight)
+OPTIONAL MATCH (flight)-[:ROTATES_TO]->(next_leg:Flight)
+OPTIONAL MATCH (episode:DecisionEpisode {trigger: 'EVENT:EVT-BAG-0836'})
+               -[:ANALYZED]->(scenario)
+OPTIONAL MATCH (episode)-[:SELECTED]->(plan:Plan)-[:PROPOSES]->
+               (action:Action)-[:AUTHORIZED_BY]->(policy:Policy)
+RETURN event.id, flight.id, next_leg.id, episode.id, plan.id,
+       collect(DISTINCT action.type), collect(DISTINCT policy.id);
+```
+
+1. Six specialists read one graph version and persist `AgentRun → Finding → Handoff` evidence.
+2. The coordinator re-reads all six handoffs and connected impact paths, constructs graph-valid candidates, and gives Qwen only the allowlisted shortlist.
+3. Before any mutation, the server re-queries the current version, required relationships, and policy authority as part of seven guards; a mismatch blocks application, while success writes the outcome and contextual memory back to FalkorDB.
 
 In the judged server mode, loss of FalkorDB returns a structured `503 GRAPH_UNAVAILABLE`, freezes the replay, disables operational controls, and marks the interface read-only. Replanning, policy authorization, handoffs, and memory cannot continue, and there is no secondary operational database that can silently replace it. After FalkorDB is restored, the health pulse reloads genuine graph state before re-enabling controls.
 
@@ -77,7 +115,7 @@ In the judged server mode, loss of FalkorDB returns a structured `503 GRAPH_UNAV
 | **Agent Memory and Coordination** | Six specialists run real concurrent domain Cypher reads, deliver timestamped versioned handoffs, and replan every five replay minutes and on events. An applied episode restores the same six unique specialist chains alongside its context-matched memory and full decision lineage. | `AgentRun → Finding → Handoff`; `DecisionEpisode-[:CONSUMED_HANDOFF]→Handoff`; `DecisionEpisode → Plan → Outcome ← Memory`; later matching `DecisionEpisode-[:RECALLED]→Memory`. |
 | **Company Brain** | Plain-language questions route to ownership, incident, current-policy, or supersession traversals and return cited graph evidence. Superseding policy increments graph state and triggers replanning. | `Policy → ProcedureVersion → SourceDocument/Team/Role`, `Incident → Event/Flight/Team/Role`, and `SUPERSEDES` history. |
 
-The complete acceptance matrix is in [Three-track coverage](docs/track-coverage.md). Copy-paste graph queries live in [`cypher/`](cypher/).
+The complete acceptance matrix is in [Three-track coverage](docs/track-coverage.md). Judges can run the [connected impact query](cypher/01_connected_impact_path.cypher), [agent handoff query](cypher/02_agent_handoffs.cypher), and [guarded-apply query](cypher/07_apply_guard.cypher), or browse the full [`cypher/` catalog](cypher/).
 
 The bundled [`mcp_server.py`](mcp_server.py) exposes six allowlisted stdio tools: `inspect_disruption`, `get_agent_handoffs`, `get_coordinator_trace`, `recall_episode`, `get_current_policy`, and `validate_candidate`. Handoff and coordinator-trace reads resolve one exact `episode_id`; cycle-only calls select the newest episode at that cycle for legacy callers, so replay resets cannot mix two runs with the same cycle number. This optional integration surface returns graph evidence and keeps plan execution behind the deterministic application guard.
 
