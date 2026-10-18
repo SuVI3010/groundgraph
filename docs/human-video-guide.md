@@ -139,12 +139,12 @@ For the **strongest founder-led cut**, use the revised script below and edit the
 **Shot sequence:**
 
 - **2:09–2:19:** Switch to **Real-day test** and show the completed July 27 scorecard. Use a short speed-ramped clock sequence rather than showing the full replay.
-- **2:19–2:36:** Cut to one clean metrics card for the 30-day benchmark. Reveal the counts first, then the comparison.
+- **2:19–2:36:** Cut to one clean metrics card for the 30-day benchmark. Keep the exact counts visible without reading them aloud, then animate the comparison.
 - **2:36–2:48:** Return to the founder on camera. Finish with the GroundGraph name and repository URL beside, not over, the speaker's face.
 
 **Say:**
 
-> FalkorDB holds shared state, handoffs, policy, memory, decisions, and evidence across all three tracks. We also tested whether the forecast tracks reality. The replay uses only information available at each hourly cutoff, then reveals the recorded result. Across thirty July days, six hundred thirty-eight forecasts, and fifty-four thousand, seven hundred seventy-four movements, average hourly delay error fell from thirty-four point nine two to nineteen point zero seven minutes. This is a one-airport retrospective benchmark, not a claim of real-world minutes saved. It shows a transparent path from disruption to an evidence-backed response. That's GroundGraph.
+> FalkorDB is GroundGraph's shared brain. It connects airport state, agent handoffs, memory, and evidence across all three tracks. We then replayed thirty days at O'Hare, hour by hour, giving the forecast only the information available at that moment. Average prediction error fell from about thirty-five minutes using the schedule alone to nineteen with GroundGraph. This is a one-airport retrospective, not a claim of real-world time saved. It shows the full loop: understand the disruption, coordinate a safe response, explain it, and learn. That's GroundGraph.
 
 **Real-day overlay:**
 

@@ -16,7 +16,7 @@ Target final length: **2:40–2:50**. Record each numbered section as a separate
 
 **Picture:** Begin on the presenter at eye level. Show a small name and `GroundGraph` lower third after two seconds. At “A late bag,” cut directly to the moving ORD airport view while the same voice continues.
 
-> An airport delay rarely stays one delay. [pause 0.4 seconds] A late bag can hold a departure, block a gate, and affect the next flight. [pause 0.5 seconds] We built GroundGraph to see that chain and help teams respond before it spreads. [tail 0.3 seconds]
+> An airport delay rarely stays one delay. [pause 0.4 seconds] A late bag can hold a departure, block a gate, and affect the next flight. [pause 0.5 seconds] I'm Viswesh Suri, and I built GroundGraph with Sai Pranav to see that chain and help teams respond before it spreads. [tail 0.3 seconds]
 
 ## 01-why-now.wav · disruption trigger · 0:16–0:31
 
@@ -62,9 +62,9 @@ Target final length: **2:40–2:50**. Record each numbered section as a separate
 
 ## 08-close.wav · factual proof to face · 2:09–2:48
 
-**Picture:** Show the completed July 27 scorecard first. Move to the 30-day card when “Across thirty July days” begins. Reveal the counts before the error comparison. Hold the comparison for the 0.8-second pause. Keep the benchmark visible through the limitation. At “It shows,” cut back to the same presenter framing used in the opening. End with the repository URL beside the presenter.
+**Picture:** Show the completed July 27 scorecard first. Move to the 30-day card when “We then replayed thirty days” begins. Keep the exact counts visible on screen instead of reading them aloud. Animate `34.92 → 19.07 min` as the comparison is spoken, then hold it for the 0.8-second pause. Keep the benchmark visible through the limitation. At “It shows,” cut back to the same presenter framing used in the opening. End with the repository URL beside the presenter.
 
-> FalkorDB holds shared state, handoffs, policy, memory, decisions, and evidence across all three tracks. [pause 0.45 seconds] We also tested whether the forecast tracks reality. [pause 0.35 seconds] The replay uses only information available at each hourly cutoff, then reveals the recorded result. [pause 0.55 seconds] Across thirty July days, six hundred thirty-eight forecasts, and fifty-four thousand seven hundred seventy-four movements, average hourly delay error fell from thirty-four point nine two to nineteen point zero seven minutes. [hold on comparison 0.8 seconds] This is a one-airport retrospective benchmark, not a claim of real-world minutes saved. [pause 0.5 seconds] It shows a transparent path from disruption to an evidence-backed response. [pause 0.3 seconds] That's GroundGraph. [tail 0.5 seconds]
+> FalkorDB is GroundGraph's shared brain. [pause 0.35 seconds] It connects airport state, agent handoffs, memory, and evidence across all three tracks. [pause 0.4 seconds] We then replayed thirty days at O'Hare, hour by hour, giving the forecast only the information available at that moment. [pause 0.45 seconds] Average prediction error fell from about thirty-five minutes using the schedule alone to nineteen with GroundGraph. [hold on comparison 0.8 seconds] This is a one-airport retrospective, not a claim of real-world time saved. [pause 0.4 seconds] It shows the full loop: understand the disruption, coordinate a safe response, explain it, and learn. [pause 0.3 seconds] That's GroundGraph. [tail 0.5 seconds]
 
 ## Face footage
 
