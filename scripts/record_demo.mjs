@@ -705,11 +705,14 @@ async function seekReplay(page, minute) {
     node.dispatchEvent(new Event("change", { bubbles: true }));
   }, minute);
 }
-async function clickDecisionEpisode(page, episodeId) {
+async function clickDecisionEpisode(page, episodeId, options = {}) {
   const locator = page.locator(`#decision-log .decision-log-card[data-episode="${String(episodeId).replaceAll('"', '\\"')}"]`).first();
   assert(await locator.count() > 0, `decision log has no row for ${episodeId}`);
-  await locator.scrollIntoViewIfNeeded();
-  await locator.click();
+  if (options.preserveViewport) await locator.evaluate((node) => node.click());
+  else {
+    await locator.scrollIntoViewIfNeeded();
+    await locator.click();
+  }
   await page.waitForFunction((id) => {
     const row = document.querySelector(`#decision-log .decision-log-card[data-episode="${CSS.escape(String(id))}"]`);
     const subtitle = document.querySelector("#story-subtitle")?.textContent || "";
@@ -1326,15 +1329,22 @@ async function recordCandidate(chromium, options) {
     });
 
     await runScene(scenes[6], async ({ at, atAudio }) => {
-      await resetCamera(page, 150);
-      await setCursorVisible(page, true);
-      await clickDecisionEpisode(page, appliedStory.episode_id);
+      await resetCamera(page, options.syncProfile === "founder" ? 0 : 150);
+      await setCursorVisible(page, options.syncProfile !== "founder");
+      await clickDecisionEpisode(page, appliedStory.episode_id, { preserveViewport: options.syncProfile === "founder" });
       const memoryTab = page.locator('[data-tab="memory"]').first();
       if (await memoryTab.count()) {
-        await demoClick(page, '[data-tab="memory"]', options.syncProfile === "founder" ? { pointMs: 100 } : {});
-        await focusCamera(page, "#memory-stage", options.syncProfile === "founder"
-          ? founderCamera({ zoom: 1.13, spotlight: true })
-          : { zoom: 1.13, spotlight: true, waitMs: 250 });
+        if (options.syncProfile === "founder") {
+          await memoryTab.evaluate((node) => node.click());
+          await page.waitForFunction(() => {
+            const stage = document.querySelector("#memory-stage");
+            return stage && !stage.hidden && Boolean(stage.querySelector(".memory-row"));
+          }, null, { timeout: 15_000 });
+          await setCursorVisible(page, true);
+        } else {
+          await demoClick(page, '[data-tab="memory"]');
+          await focusCamera(page, "#memory-stage", { zoom: 1.13, spotlight: true, waitMs: 250 });
+        }
       } else await focusCamera(page, UI.outcome, { zoom: 1.14, spotlight: true, waitMs: 250 });
       if (options.syncProfile === "founder") {
         await atAudio("memoryStored");
@@ -1350,20 +1360,33 @@ async function recordCandidate(chromium, options) {
         await atAudio("operatorAsks");
       } else await at(10);
       const close = page.locator("#proof-close").first();
-      if (await close.count() && await close.isVisible()) await close.click();
+      if (await close.count() && await close.isVisible()) {
+        if (options.syncProfile === "founder") await close.evaluate((node) => node.click());
+        else await close.click();
+      }
       if (options.syncProfile === "founder") await resetCamera(page, 80);
       else await focusCamera(page, ".brain-card", { zoom: 1.13, spotlight: true, waitMs: 250 });
       const question = "Who owns the current gate reassignment policy?";
       const responsePromise = options.syncProfile === "founder"
         ? page.waitForResponse((response) => response.url().includes("/api/company-brain") && response.request().method() === "POST", { timeout: 30_000 })
         : null;
-      await demoClick(page, `[data-brain-question="${question}"]`, options.syncProfile === "founder" ? { pointMs: 100 } : {});
+      if (options.syncProfile === "founder") {
+        await setCursorVisible(page, false);
+        const submitted = await page.evaluate((value) => {
+          const button = [...document.querySelectorAll("[data-brain-question]")].find((node) => node.dataset.brainQuestion === value);
+          if (!button) return false;
+          button.click();
+          return true;
+        }, question);
+        assert(submitted, "Company Brain preset must be available without scrolling the viewport");
+      } else await demoClick(page, `[data-brain-question="${question}"]`);
       await page.waitForSelector("#brain-answer .brain-response", { timeout: 30_000 });
       const answer = responsePromise ? await (await responsePromise).json() : await jsonRequest(options.url, "/api/company-brain", { method: "POST", body: JSON.stringify({ question }) });
       assert(answer.answer_type === "OWNERSHIP_AND_AUTHORITY", "Operations Brain must return ownership and authority");
       assert(list(answer.evidence_ids).length >= 4 && list(answer.graph_path).length >= 3, "Operations Brain answer must include graph evidence and path");
       if (options.syncProfile === "founder") {
         await showCompanyBrainDetail(page);
+        await setCursorVisible(page, true);
         await atAudio("companyBrain");
         await pointTo(page, "#demo-recorder-detail .brain-proof-row", 220);
         await atAudio("evidence");
