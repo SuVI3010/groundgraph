@@ -255,7 +255,7 @@ Runtime configuration lives in [`.env.example`](.env.example). Defaults enable l
 ## Team
 
 - **Viswesh Suri**
-- **Sai Pranav**
+- **Sai Pranav Siddamshetty**
 
 GroundGraph was built for Graph Hacks 2026. OpenAI Codex assisted development and documentation; the product coordinator is a separate local Qwen runtime constrained to the server-generated `model_candidate_set`. See the [AI use disclosure](docs/ai-disclosure.md) for the complete boundary.
 

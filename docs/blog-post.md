@@ -8,7 +8,7 @@ description: "How one airport delay led us to a graph-native, multi-agent recove
 
 *We followed one airport delay instead—and found a problem built for graphs.*
 
-*By Viswesh Suri and Sai Pranav · Graph Hacks 2026*
+*By Viswesh Suri and Sai Pranav Siddamshetty · Graph Hacks 2026*
 
 [![GroundGraph showing a connected airport recovery](https://raw.githubusercontent.com/SuVI3010/groundgraph/main/demo/groundgraph-demo-cover.jpg)](https://youtu.be/Cc0sYNm7V-0)
 
